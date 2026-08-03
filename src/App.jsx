@@ -241,6 +241,12 @@ const sfx = {
     tone(392, 0.28, 0.15, "triangle", 0.19);
     tone(261.63, 0.42, 0.55, "triangle", 0.21);
   },
+  tieBreak: () => {
+    tone(587.33, 0, 0.1, "square", 0.13);
+    tone(440, 0.09, 0.1, "square", 0.13);
+    tone(587.33, 0.18, 0.1, "square", 0.13);
+    tone(440, 0.27, 0.17, "square", 0.13);
+  },
 };
 
 // ---------- Confetti burst (pure CSS/JS, no external libs) ----------
@@ -285,7 +291,7 @@ function Confetti({ legendary = false }) {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState("setup"); // setup | wave-intro | auction | reveal | wave-summary-step | wave-summary | final
+  const [screen, setScreen] = useState("setup"); // setup | wave-intro | auction | reveal | tie-select | wave-summary-step | wave-summary | final
   const [players, setPlayers] = useState([]);
   const [nameInput, setNameInput] = useState("");
   const [netWorth, setNetWorth] = useState({});
@@ -300,6 +306,8 @@ export default function App() {
   const [lastResult, setLastResult] = useState(null);
   const [history, setHistory] = useState([]);
   const [celebrate, setCelebrate] = useState(null); // { legendary, id } drives confetti burst
+  const [biddingPool, setBiddingPool] = useState(null); // null = everyone; array = tie-break round restricted to these names
+  const [tieSelected, setTieSelected] = useState([]); // names toggled on the tie-select screen
   const timerRef = useRef(null);
   const waveAssetsRef = useRef([]);
 
@@ -341,6 +349,7 @@ export default function App() {
     setAssetIndexInWave(0);
     setCurrentAsset(drawn[0]);
     setBidders({});
+    setBiddingPool(null);
     setTimeLeft(10);
     setTimerActive(true);
     setScreen("auction");
@@ -387,13 +396,14 @@ export default function App() {
     }
   }, [timeLeft, timerActive]);
 
-  // end the bidding window early once every player has placed a bid
+  // end the bidding window early once every eligible player has placed a bid
   React.useEffect(() => {
     if (!timerActive) return;
-    if (players.length > 0 && Object.keys(bidders).length >= players.length) {
+    const pool = biddingPool || players;
+    if (pool.length > 0 && Object.keys(bidders).length >= pool.length) {
       stopTimerAndReveal();
     }
-  }, [bidders, timerActive, players.length]);
+  }, [bidders, timerActive, biddingPool, players.length]);
 
   function declareWinner(name) {
     const legendary = currentAsset.value >= 10;
@@ -402,13 +412,41 @@ export default function App() {
     setHistory((h) => [...h, { wave, asset: currentAsset, winner: name, value: currentAsset.value }]);
     (legendary ? sfx.legendaryWin : sfx.win)();
     setCelebrate({ legendary, id: Date.now() });
+    setBiddingPool(null);
     setScreen("wave-summary-step");
   }
 
   function declareUnclaimed() {
     sfx.unclaimed();
     setLastResult({ winner: null, asset: currentAsset, unclaimed: true });
+    setBiddingPool(null);
     setScreen("wave-summary-step");
+  }
+
+  function startTieSelect() {
+    sfx.uiClick();
+    setTieSelected([]);
+    setScreen("tie-select");
+  }
+
+  function toggleTieCandidate(name) {
+    sfx.uiClick();
+    setTieSelected((sel) => (sel.includes(name) ? sel.filter((n) => n !== name) : [...sel, name]));
+  }
+
+  function cancelTieSelect() {
+    sfx.uiClick();
+    setScreen("reveal");
+  }
+
+  function confirmTieBreak() {
+    if (tieSelected.length < 2) return;
+    sfx.tieBreak();
+    setBiddingPool(tieSelected);
+    setBidders({});
+    setTimeLeft(10);
+    setTimerActive(true);
+    setScreen("auction");
   }
 
   function nextAssetOrWaveEnd() {
@@ -507,7 +545,8 @@ export default function App() {
           <AuctionScreen
             asset={currentAsset}
             index={assetIndexInWave}
-            players={players}
+            players={biddingPool || players}
+            tieRound={!!biddingPool}
             bidders={bidders}
             toggleBid={toggleBid}
             timeLeft={timeLeft}
@@ -521,6 +560,17 @@ export default function App() {
             bidders={bidders}
             onDeclareWinner={declareWinner}
             onUnclaimed={declareUnclaimed}
+            onTie={startTieSelect}
+          />
+        )}
+
+        {screen === "tie-select" && (
+          <TieSelectScreen
+            bidders={Object.keys(bidders)}
+            selected={tieSelected}
+            onToggle={toggleTieCandidate}
+            onConfirm={confirmTieBreak}
+            onCancel={cancelTieSelect}
           />
         )}
 
@@ -648,7 +698,7 @@ function WaveIntro({ wave, totalWaves, players, onStart }) {
   );
 }
 
-function AuctionScreen({ asset, index, players, bidders, toggleBid, timeLeft, onTimeUp }) {
+function AuctionScreen({ asset, index, players, tieRound, bidders, toggleBid, timeLeft, onTimeUp }) {
   const tier = TIER_STYLE[asset.tier];
   const bidderCount = Object.keys(bidders).length;
   const pct = timeLeft / 10;
@@ -656,7 +706,7 @@ function AuctionScreen({ asset, index, players, bidders, toggleBid, timeLeft, on
 
   return (
     <div style={styles.panel}>
-      <div style={styles.eyebrow}>ASSET {index + 1} OF 5</div>
+      <div style={styles.eyebrow}>{tieRound ? "TIE-BREAKER ROUND" : `ASSET ${index + 1} OF 5`}</div>
 
       <div style={{ ...styles.timerRing, borderColor: urgent ? "#A33E3E" : "#D4AF37", animation: urgent ? "urgentPulse 0.5s ease-in-out infinite" : "none" }}>
         <span style={{ ...styles.timerNum, color: urgent ? "#E86A6A" : "#F2CB6B" }}>{timeLeft}</span>
@@ -692,7 +742,9 @@ function AuctionScreen({ asset, index, players, bidders, toggleBid, timeLeft, on
       </div>
 
       <p style={styles.instructionLine}>
-        Place your card face-down on the table now, then tap the circle on your side of the screen to confirm you're bidding — before the timer runs out.
+        {tieRound
+          ? `Tied players only: ${players.join(", ")} — draw a fresh card and tap your circle to bid again for this same asset.`
+          : "Place your card face-down on the table now, then tap the circle on your side of the screen to confirm you're bidding — before the timer runs out."}
       </p>
 
       {players.map((p, i) => {
@@ -728,7 +780,7 @@ function AuctionScreen({ asset, index, players, bidders, toggleBid, timeLeft, on
   );
 }
 
-function RevealScreen({ asset, bidders, onDeclareWinner, onUnclaimed }) {
+function RevealScreen({ asset, bidders, onDeclareWinner, onUnclaimed, onTie }) {
   const names = Object.keys(bidders);
   return (
     <div style={styles.panel}>
@@ -746,15 +798,66 @@ function RevealScreen({ asset, bidders, onDeclareWinner, onUnclaimed }) {
           Continue — Unclaimed
         </button>
       ) : (
-        <div style={styles.playerBidGrid}>
-          {names.map((name) => (
-            <button key={name} onClick={() => onDeclareWinner(name)} style={styles.winnerPickBtn}>
-              <Crown size={18} color="#D4AF37" />
-              <span style={styles.bidToggleName}>{name}</span>
+        <>
+          <div style={styles.playerBidGrid}>
+            {names.map((name) => (
+              <button key={name} onClick={() => onDeclareWinner(name)} style={styles.winnerPickBtn}>
+                <Crown size={18} color="#D4AF37" />
+                <span style={styles.bidToggleName}>{name}</span>
+              </button>
+            ))}
+          </div>
+          {names.length >= 2 && (
+            <button style={styles.tieBtn} onClick={onTie}>
+              It's a Tie — Pick Who
             </button>
-          ))}
-        </div>
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+function TieSelectScreen({ bidders, selected, onToggle, onConfirm, onCancel }) {
+  return (
+    <div style={styles.panel}>
+      <div style={styles.eyebrow}>TIE-BREAKER</div>
+      <h1 style={styles.h1}>Who Tied?</h1>
+      <p style={styles.subtitle}>Tap everyone who played the same highest card. They'll draw and bid again for this asset.</p>
+
+      <div style={styles.playerBidGrid}>
+        {bidders.map((name) => {
+          const active = selected.includes(name);
+          return (
+            <button
+              key={name}
+              onClick={() => onToggle(name)}
+              style={{
+                ...styles.bidToggle,
+                borderColor: active ? "#D4AF37" : "#2A3348",
+                background: active ? "rgba(212,175,55,0.12)" : "transparent",
+              }}
+            >
+              <span style={styles.bidToggleName}>{name}</span>
+              <span style={{ ...styles.bidToggleStatus, color: active ? "#D4AF37" : "#4A5266" }}>
+                {active ? "TIED ✓" : "TAP TO SELECT"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        style={{ ...styles.primaryBtn, opacity: selected.length >= 2 ? 1 : 0.4 }}
+        disabled={selected.length < 2}
+        onClick={onConfirm}
+      >
+        <ChevronRight size={18} />
+        {selected.length < 2 ? "Select at Least 2" : `Tie-Break Between ${selected.length}`}
+      </button>
+      <button style={styles.secondaryBtn} onClick={onCancel}>
+        Cancel — Back to Reveal
+      </button>
     </div>
   );
 }
@@ -1025,6 +1128,33 @@ const styles = {
     justifyContent: "center",
     gap: 8,
     marginTop: 10,
+  },
+  secondaryBtn: {
+    width: "100%",
+    background: "transparent",
+    color: "#8A93A8",
+    border: "1.5px solid #2A3348",
+    borderRadius: 12,
+    padding: "13px 20px",
+    fontSize: 13,
+    fontWeight: 600,
+    fontFamily: "'Inter', sans-serif",
+    cursor: "pointer",
+    marginTop: 8,
+  },
+  tieBtn: {
+    width: "100%",
+    background: "transparent",
+    color: "#A33E3E",
+    border: "1.5px dashed #A33E3E",
+    borderRadius: 12,
+    padding: "13px 20px",
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: "0.03em",
+    fontFamily: "'Inter', sans-serif",
+    cursor: "pointer",
+    marginTop: 6,
   },
   hintSmall: { fontSize: 12, color: "#4A5266", marginTop: 8 },
   instructionBox: {
