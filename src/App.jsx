@@ -678,11 +678,13 @@ function SetupScreen({ players, nameInput, setNameInput, addPlayer, removePlayer
 }
 
 function WaveIntro({ wave, totalWaves, players, onStart }) {
+  const twoPlayer = players.length === 2;
+  const handSize = twoPlayer ? 7 : 5;
   return (
     <div style={styles.panel}>
       <div style={styles.eyebrow}>WAVE {wave} OF {totalWaves}</div>
       <h1 style={styles.h1}>Draw Your Hand</h1>
-      <p style={styles.subtitle}>Each player draws 5 cards from the shared deck.</p>
+      <p style={styles.subtitle}>Each player draws {handSize} cards from the shared deck.</p>
 
       <div style={styles.instructionBox}>
         <div style={styles.instructionStep}>
@@ -691,10 +693,16 @@ function WaveIntro({ wave, totalWaves, players, onStart }) {
         </div>
         <div style={styles.instructionStep}>
           <span style={styles.stepNum}>2</span>
-          <span>Deal 5 cards face-down to each of the {players.length} players.</span>
+          <span>Deal {handSize} cards face-down to each of the {players.length} players.</span>
         </div>
+        {twoPlayer && (
+          <div style={styles.instructionStep}>
+            <span style={styles.stepNum}>!</span>
+            <span>2 extra cards each — a buffer so a tie-break earlier in the wave doesn't leave you with nothing to bid for the last asset.</span>
+          </div>
+        )}
         <div style={styles.instructionStep}>
-          <span style={styles.stepNum}>3</span>
+          <span style={styles.stepNum}>{twoPlayer ? 4 : 3}</span>
           <span>Keep your hand hidden. When everyone's ready, begin the auction.</span>
         </div>
       </div>
@@ -758,7 +766,7 @@ function AuctionScreen({ asset, index, players, tieRound, bidders, toggleBid, ti
 
       <p style={styles.instructionLine}>
         {tieRound
-          ? `Tied players only: ${players.join(", ")} — draw a fresh card and tap your circle to bid again for this same asset.`
+          ? `Tied players only: ${players.join(", ")} — draw a fresh card from the shared pile (not your wave hand) and tap your circle to bid again for this same asset.`
           : "Place your card face-down on the table now, then tap the circle on your side of the screen to confirm you're bidding — before the timer runs out."}
       </p>
 
