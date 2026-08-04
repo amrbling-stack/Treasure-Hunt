@@ -310,7 +310,7 @@ export default function App() {
   const [assetDeck, setAssetDeck] = useState([]);
   const [currentAsset, setCurrentAsset] = useState(null);
   const [bidders, setBidders] = useState({}); // name -> true if bidding
-  const [timeLeft, setTimeLeft] = useState(10);
+  const [timeLeft, setTimeLeft] = useState(15);
   const [timerActive, setTimerActive] = useState(false);
   const [lastResult, setLastResult] = useState(null);
   const [history, setHistory] = useState([]);
@@ -359,7 +359,7 @@ export default function App() {
     setCurrentAsset(drawn[0]);
     setBidders({});
     setBiddingPool(null);
-    setTimeLeft(10);
+    setTimeLeft(15);
     setTimerActive(true);
     setScreen("auction");
   }
@@ -400,7 +400,7 @@ export default function App() {
   // tick sound each second the countdown ticks down (skip the initial reset value)
   React.useEffect(() => {
     if (!timerActive) return;
-    if (timeLeft > 0 && timeLeft < 10) {
+    if (timeLeft > 0 && timeLeft < 15) {
       (timeLeft <= 3 ? sfx.tickUrgent : sfx.tick)();
     }
   }, [timeLeft, timerActive]);
@@ -453,7 +453,7 @@ export default function App() {
     sfx.tieBreak();
     setBiddingPool(tieSelected);
     setBidders({});
-    setTimeLeft(10);
+    setTimeLeft(15);
     setTimerActive(true);
     setScreen("auction");
   }
@@ -466,7 +466,7 @@ export default function App() {
       setAssetIndexInWave(nextIdx);
       setCurrentAsset(waveAssets[nextIdx]);
       setBidders({});
-      setTimeLeft(10);
+      setTimeLeft(15);
       setTimerActive(true);
       setScreen("auction");
     } else {
@@ -710,7 +710,7 @@ function WaveIntro({ wave, totalWaves, players, onStart }) {
 function AuctionScreen({ asset, index, players, tieRound, bidders, toggleBid, timeLeft, onTimeUp }) {
   const tier = TIER_STYLE[asset.tier];
   const bidderCount = Object.keys(bidders).length;
-  const pct = timeLeft / 10;
+  const pct = timeLeft / 15;
   const urgent = timeLeft <= 3;
 
   return (
@@ -1294,8 +1294,8 @@ const styles = {
   bidToggleStatus: { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em" },
   bidCircle: {
     position: "fixed",
-    width: "clamp(66px, 20vw, 88px)",
-    height: "clamp(66px, 20vw, 88px)",
+    width: "clamp(80px, 24vw, 106px)",
+    height: "clamp(80px, 24vw, 106px)",
     borderRadius: "50%",
     border: "2px solid",
     display: "flex",
@@ -1305,11 +1305,11 @@ const styles = {
     gap: 3,
     cursor: "pointer",
     zIndex: 40,
-    padding: "4px 6px",
+    padding: "5px 7px",
     transition: "background 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease",
   },
-  bidCircleName: { fontSize: 12, fontWeight: 700, color: "#E8DCC0", lineHeight: 1.1, textAlign: "center" },
-  bidCircleStatus: { fontSize: 8.5, fontWeight: 700, letterSpacing: "0.05em", textAlign: "center" },
+  bidCircleName: { fontSize: 14, fontWeight: 700, color: "#E8DCC0", lineHeight: 1.1, textAlign: "center" },
+  bidCircleStatus: { fontSize: 10, fontWeight: 700, letterSpacing: "0.05em", textAlign: "center" },
   revealGrid: { width: "100%", display: "flex", flexDirection: "column", gap: 10, margin: "10px 0" },
   revealRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 },
   revealName: { fontSize: 14, fontWeight: 600, color: "#E8DCC0", minWidth: 90, textAlign: "left" },
