@@ -1058,9 +1058,8 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
   );
 }
 
-function AuctionScreen({ asset, index, waveAssets, players, seatPositions, tieRound, bidders, toggleBid, timeLeft, onTimeUp }) {
+function AuctionScreen({ asset, index, waveAssets, players, seatPositions, tieRound, bidders, toggleBid, timeLeft }) {
   const tier = TIER_STYLE[asset.tier];
-  const bidderCount = Object.keys(bidders).length;
   const pct = timeLeft / 15;
   const urgent = timeLeft <= 3;
 
@@ -1173,10 +1172,6 @@ function AuctionScreen({ asset, index, waveAssets, players, seatPositions, tieRo
         );
       })}
 
-      <button style={styles.primaryBtn} onClick={onTimeUp}>
-        <ChevronRight size={18} />
-        {bidderCount > 0 ? "End Bidding Now" : "No One's Bid Yet — End Now"}
-      </button>
     </div>
   );
 }
@@ -1604,10 +1599,7 @@ const styles = {
     margin: "4px 0 4px 0",
   },
   timerRing: {
-    position: "fixed",
-    left: "50%",
-    top: "50%",
-    transform: "translate(-50%, -50%)",
+    position: "relative",
     width: 68,
     height: 68,
     borderRadius: "50%",
@@ -1618,8 +1610,8 @@ const styles = {
     background: "rgba(13,18,32,0.88)",
     backdropFilter: "blur(3px)",
     boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
-    zIndex: 45,
-    pointerEvents: "none",
+    margin: "4px 0",
+    flexShrink: 0,
   },
   timerNum: {
     fontFamily: "'Cinzel', serif",
