@@ -389,6 +389,7 @@ export default function App() {
   const [celebrate, setCelebrate] = useState(null); // { legendary, id } drives confetti burst
   const [biddingPool, setBiddingPool] = useState(null); // null = everyone; array = tie-break round restricted to these names
   const [tieSelected, setTieSelected] = useState([]); // names toggled on the tie-select screen
+  const [memoryFinalWave, setMemoryFinalWave] = useState(false); // hide asset value during bidding on the final wave
   const timerRef = useRef(null);
   const waveAssetsRef = useRef([]);
 
@@ -687,6 +688,8 @@ export default function App() {
             addPlayer={addPlayer}
             removePlayer={removePlayer}
             startGame={startGame}
+            memoryFinalWave={memoryFinalWave}
+            setMemoryFinalWave={setMemoryFinalWave}
           />
         )}
 
@@ -737,6 +740,7 @@ export default function App() {
             toggleBid={toggleBid}
             timeLeft={timeLeft}
             onTimeUp={stopTimerAndReveal}
+            hideValue={memoryFinalWave && wave === totalWaves}
           />
         )}
 
@@ -812,7 +816,7 @@ function Header({ wave, totalWaves, screen }) {
   );
 }
 
-function SetupScreen({ players, nameInput, setNameInput, addPlayer, removePlayer, startGame }) {
+function SetupScreen({ players, nameInput, setNameInput, addPlayer, removePlayer, startGame, memoryFinalWave, setMemoryFinalWave }) {
   return (
     <div style={styles.panel}>
       <div style={styles.eyebrow}>PASS-AND-PLAY · 2–7 PLAYERS</div>
@@ -847,6 +851,56 @@ function SetupScreen({ players, nameInput, setNameInput, addPlayer, removePlayer
         ))}
         {players.length === 0 && <div style={styles.emptyHint}>Add at least 2 players to begin.</div>}
       </div>
+
+      <button
+        type="button"
+        onClick={() => setMemoryFinalWave((v) => !v)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          width: "100%",
+          textAlign: "left",
+          background: "#0D1220",
+          border: "1.5px solid #2A3348",
+          borderRadius: 10,
+          padding: "12px 14px",
+          margin: "10px 0 4px",
+          cursor: "pointer",
+        }}
+      >
+        <span>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#E8DCC0" }}>Final Wave Memory Challenge</div>
+          <div style={{ fontSize: 11, color: "#8A93A8", marginTop: 2 }}>
+            On the last wave, values are hidden during bidding — remember them from the preview.
+          </div>
+        </span>
+        <span
+          style={{
+            flexShrink: 0,
+            width: 42,
+            height: 24,
+            borderRadius: 12,
+            position: "relative",
+            background: memoryFinalWave ? "#D4AF37" : "#232C42",
+            transition: "background 0.15s ease",
+          }}
+        >
+          <span
+            style={{
+              position: "absolute",
+              top: 2,
+              left: memoryFinalWave ? 20 : 2,
+              width: 20,
+              height: 20,
+              borderRadius: "50%",
+              background: memoryFinalWave ? "#0A0E17" : "#8A93A8",
+              transition: "left 0.15s ease",
+            }}
+          />
+        </span>
+      </button>
 
       <button
         style={{ ...styles.primaryBtn, opacity: players.length >= 2 ? 1 : 0.4 }}
@@ -1104,45 +1158,15 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
   );
 }
 
-function AuctionScreen({ asset, index, waveAssets, players, seatPositions, tieRound, bidders, toggleBid, timeLeft }) {
+function AuctionScreen({ asset, index, waveAssets, players, seatPositions, tieRound, bidders, toggleBid, timeLeft, hideValue }) {
   const pct = timeLeft / 15;
   const urgent = timeLeft <= 3;
 
   return (
     <div style={styles.panel}>
-      <div style={styles.eyebrow}>{tieRound ? "TIE-BREAKER ROUND" : `ASSET ${index + 1} OF 5`}</div>
-
-      {!tieRound && waveAssets && waveAssets.length > 0 && (
-        <div style={{ display: "flex", gap: 6, marginBottom: 4, flexWrap: "wrap", justifyContent: "center" }}>
-          {waveAssets.map((a, i) => {
-            const claimed = i < index;
-            const isCurrent = i === index;
-            return (
-              <div
-                key={a.key}
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 6,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  fontFamily: "'Cinzel', serif",
-                  border: isCurrent ? "1px solid #D4AF37" : "1px solid #2A3348",
-                  color: claimed ? "#4A5266" : isCurrent ? "#F2CB6B" : "#8A93A8",
-                  background: claimed ? "rgba(19,27,46,0.3)" : isCurrent ? "rgba(212,175,55,0.15)" : "rgba(19,27,46,0.6)",
-                  textDecoration: claimed ? "line-through" : "none",
-                  opacity: claimed ? 0.5 : 1,
-                }}
-              >
-                {a.value}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <div style={{ ...styles.eyebrow, color: "#F2CB6B", fontSize: 14, fontWeight: 800 }}>
+        {tieRound ? "TIE-BREAKER ROUND" : `ASSET ${index + 1} OF ${waveAssets?.length || 5}`}
+      </div>
 
       <div
         style={{
@@ -1176,7 +1200,13 @@ function AuctionScreen({ asset, index, waveAssets, players, seatPositions, tieRo
           );
         })()}
         <div style={styles.assetValueRow}>
-          <span style={styles.assetValue}>{asset.value}</span>
+          {hideValue ? (
+            <span style={{ fontSize: 13, color: "#8A93A8", fontStyle: "italic" }}>
+              Value hidden — what was it worth?
+            </span>
+          ) : (
+            <span style={styles.assetValue}>{asset.value}</span>
+          )}
         </div>
       </div>
 
