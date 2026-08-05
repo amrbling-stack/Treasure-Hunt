@@ -114,6 +114,89 @@ function waveCountFor(players) {
   return 7;
 }
 
+// ---------- Hand dealing: equal totals, shaped to minimize card-value overlap ----------
+// A standard 40-card bidding deck: values 1-10, four copies of each (like four suits).
+function buildBidDeck() {
+  const deck = [];
+  for (let v = 1; v <= 10; v++) for (let s = 0; s < 4; s++) deck.push(v);
+  return deck;
+}
+
+// Try to find `handSize` cards from `pool` (array of {v, used}) summing to `target`.
+// Returns an array of pool-indices, or null if not found within the attempt budget.
+function findHandSummingTo(pool, handSize, target, attempts = 500) {
+  const available = pool.map((c, i) => i).filter((i) => !pool[i].used);
+  if (available.length < handSize) return null;
+  for (let a = 0; a < attempts; a++) {
+    const idxs = shuffle(available).slice(0, handSize);
+    const sum = idxs.reduce((s, i) => s + pool[i].v, 0);
+    if (sum === target) return idxs;
+  }
+  return null;
+}
+
+// Deal one candidate set of equal-total hands. Returns array of hands (each an array
+// of numbers) or null if this attempt failed (caller should retry).
+function dealEqualTotalsOnce(numPlayers, handSize) {
+  const deckVals = shuffle(buildBidDeck());
+  const pool = deckVals.map((v) => ({ v, used: false }));
+  const lo = handSize * 1;
+  const hi = handSize * 10;
+  const span = hi - lo;
+  // Draw player 1's hand from the mid-range of possible totals so there's a rich
+  // pool of alternate combinations for every other player to match against.
+  let target = null;
+  for (let a = 0; a < 200; a++) {
+    const idxs = shuffle(pool.map((_, i) => i)).slice(0, handSize);
+    const sum = idxs.reduce((s, i) => s + pool[i].v, 0);
+    if (sum >= lo + 0.25 * span && sum <= lo + 0.75 * span) {
+      target = sum;
+      idxs.forEach((i) => (pool[i].used = true));
+      break;
+    }
+  }
+  if (target === null) return null;
+
+  const hands = [pool.filter((c) => c.used).map((c) => c.v)];
+  for (let p = 1; p < numPlayers; p++) {
+    const idxs = findHandSummingTo(pool, handSize, target);
+    if (!idxs) return null;
+    idxs.forEach((i) => (pool[i].used = true));
+    hands.push(idxs.map((i) => pool[i].v));
+  }
+  return hands.map((h) => h.slice().sort((a, b) => a - b));
+}
+
+// How many card VALUES are shared by 2+ players — this is what causes bid collisions/ties.
+function overlapScore(hands) {
+  let score = 0;
+  for (let v = 1; v <= 10; v++) {
+    const holders = hands.filter((h) => h.includes(v)).length;
+    if (holders > 1) score += holders - 1;
+  }
+  const tops = hands.map((h) => Math.max(...h));
+  const topClash = new Set(tops).size < tops.length;
+  return score + (topClash ? 3 : 0);
+}
+
+// Public entry point: deal equal-total hands, trying several candidates and keeping
+// the one with the least value-overlap between players (fewest likely collisions/ties).
+function dealHands(numPlayers, handSize, tries = 40) {
+  let best = null;
+  let bestScore = Infinity;
+  for (let t = 0; t < tries; t++) {
+    const candidate = dealEqualTotalsOnce(numPlayers, handSize);
+    if (!candidate) continue;
+    const score = overlapScore(candidate);
+    if (score < bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+    if (bestScore === 0) break;
+  }
+  return best; // null if every attempt failed (caller should retry from scratch)
+}
+
 function shuffle(arr) {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -300,7 +383,7 @@ function Confetti({ legendary = false }) {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState("setup"); // setup | wave-intro | auction | reveal | tie-select | wave-summary-step | wave-summary | final
+  const [screen, setScreen] = useState("setup"); // setup | hand-deal | wave-intro | auction | reveal | tie-select | wave-summary-step | wave-summary | final
   const [players, setPlayers] = useState([]);
   const [nameInput, setNameInput] = useState("");
   const [netWorth, setNetWorth] = useState({});
@@ -309,6 +392,13 @@ export default function App() {
   const [assetIndexInWave, setAssetIndexInWave] = useState(0);
   const [assetDeck, setAssetDeck] = useState([]);
   const [currentAsset, setCurrentAsset] = useState(null);
+  const [dealtHands, setDealtHands] = useState([]); // array of {name, cards:[..]} for the current wave
+  const [dealRevealIndex, setDealRevealIndex] = useState(0); // which player's hand is on screen during pass-and-play
+  const [handDealPhase, setHandDealPhase] = useState("pass"); // "pass" = blind handoff screen, "reveal" = cards showing
+  const [waveAssets, setWaveAssets] = useState([]); // this wave's 5 assets, shown in the preview + top strip
+  const [seatPositions, setSeatPositions] = useState({}); // name -> {x,y} percent-of-screen, tapped once per match
+  const [seatArrangeIndex, setSeatArrangeIndex] = useState(0);
+  const [tempSeatPick, setTempSeatPick] = useState(null);
   const [bidders, setBidders] = useState({}); // name -> true if bidding
   const [timeLeft, setTimeLeft] = useState(15);
   const [timerActive, setTimerActive] = useState(false);
@@ -333,28 +423,84 @@ export default function App() {
     setPlayers(players.filter((p) => p !== n));
   }
 
-  function drawAssetPool(count) {
+  function drawAssetPool(count, fromPile) {
     // refill/reshuffle whenever we don't have enough left
-    let pile = assetDeck;
+    let pile = fromPile;
     if (pile.length < count) pile = shuffle(ASSET_POOL);
     const drawn = pile.slice(0, count);
     setAssetDeck(pile.slice(count));
     return drawn;
   }
 
+  const handSizeFor = (n) => (n === 2 ? 7 : 5);
+
+  // Deal this wave's hands (equal totals, shaped to minimize card overlap between
+  // players) and draw this wave's 5 assets — both happen up front so the preview
+  // and the pass-and-play deal can show everything before bidding starts.
+  function setUpWave(pile) {
+    const handSize = handSizeFor(players.length);
+    let hands = dealHands(players.length, handSize);
+    if (!hands) hands = dealEqualTotalsOnce(players.length, handSize); // rare fallback
+    if (!hands) {
+      // last-resort fallback: plain random hands, never block the game
+      const deck = shuffle(buildBidDeck());
+      hands = players.map((_, i) => deck.slice(i * handSize, (i + 1) * handSize).sort((a, b) => a - b));
+    }
+    setDealtHands(players.map((name, i) => ({ name, cards: hands[i] })));
+    setDealRevealIndex(0);
+    setHandDealPhase("pass");
+
+    const drawn = drawAssetPool(5, pile);
+    waveAssetsRef.current = drawn;
+    setWaveAssets(drawn);
+  }
+
   function startGame() {
+    sfx.uiClick();
+    setSeatPositions({});
+    setSeatArrangeIndex(0);
+    setTempSeatPick(null);
+    setScreen("seat-arrange");
+  }
+
+  function pickSeat(xPct, yPct) {
+    const clamp = (v) => Math.min(92, Math.max(8, v));
+    setTempSeatPick({ x: clamp(xPct), y: clamp(yPct) });
+  }
+
+  function confirmSeat() {
+    if (!tempSeatPick) return;
+    sfx.uiClick();
+    const name = players[seatArrangeIndex];
+    setSeatPositions((sp) => ({ ...sp, [name]: tempSeatPick }));
+    setTempSeatPick(null);
+    if (seatArrangeIndex + 1 < players.length) {
+      setSeatArrangeIndex((i) => i + 1);
+    } else {
+      beginGameAfterSeating();
+    }
+  }
+
+  function skipSeating() {
+    sfx.uiClick();
+    setSeatPositions({});
+    beginGameAfterSeating();
+  }
+
+  function beginGameAfterSeating() {
     sfx.gameStart();
     const tw = waveCountFor(players.length);
     setTotalWaves(tw);
     setWave(1);
-    setAssetDeck(shuffle(ASSET_POOL));
-    setScreen("wave-intro");
+    const pile = shuffle(ASSET_POOL);
+    setAssetDeck(pile);
+    setUpWave(pile);
+    setScreen("hand-deal");
   }
 
   function beginWaveAuction() {
     sfx.uiClick();
-    const drawn = drawAssetPool(5);
-    waveAssetsRef.current = drawn;
+    const drawn = waveAssetsRef.current;
     setAssetIndexInWave(0);
     setCurrentAsset(drawn[0]);
     setBidders({});
@@ -484,7 +630,23 @@ export default function App() {
   function nextWave() {
     sfx.uiClick();
     setWave((w) => w + 1);
-    setScreen("wave-intro");
+    setUpWave(assetDeck);
+    setScreen("hand-deal");
+  }
+
+  function revealHand() {
+    sfx.uiClick();
+    setHandDealPhase("reveal");
+  }
+
+  function advanceHandDeal() {
+    sfx.uiClick();
+    if (dealRevealIndex + 1 < dealtHands.length) {
+      setDealRevealIndex((i) => i + 1);
+      setHandDealPhase("pass");
+    } else {
+      setScreen("wave-intro");
+    }
   }
 
   function resetGame() {
@@ -495,6 +657,11 @@ export default function App() {
     setAssetDeck([]);
     setHistory([]);
     setCelebrate(null);
+    setDealtHands([]);
+    setWaveAssets([]);
+    setSeatPositions({});
+    setSeatArrangeIndex(0);
+    setTempSeatPick(null);
     setScreen("setup");
   }
 
@@ -541,11 +708,37 @@ export default function App() {
           />
         )}
 
+        {screen === "seat-arrange" && (
+          <SeatArrangeScreen
+            playerName={players[seatArrangeIndex]}
+            index={seatArrangeIndex}
+            total={players.length}
+            tempPick={tempSeatPick}
+            onPick={pickSeat}
+            onConfirm={confirmSeat}
+            onSkip={skipSeating}
+          />
+        )}
+
+        {screen === "hand-deal" && dealtHands.length > 0 && (
+          <HandDealScreen
+            wave={wave}
+            totalWaves={totalWaves}
+            hand={dealtHands[dealRevealIndex]}
+            index={dealRevealIndex}
+            total={dealtHands.length}
+            phase={handDealPhase}
+            onReveal={revealHand}
+            onNext={advanceHandDeal}
+          />
+        )}
+
         {screen === "wave-intro" && (
           <WaveIntro
             wave={wave}
             totalWaves={totalWaves}
             players={players}
+            assets={waveAssets}
             onStart={beginWaveAuction}
           />
         )}
@@ -554,7 +747,9 @@ export default function App() {
           <AuctionScreen
             asset={currentAsset}
             index={assetIndexInWave}
+            waveAssets={waveAssets}
             players={biddingPool || players}
+            seatPositions={seatPositions}
             tieRound={!!biddingPool}
             bidders={bidders}
             toggleBid={toggleBid}
@@ -609,7 +804,7 @@ export default function App() {
 // ---------- Subcomponents ----------
 
 function Header({ wave, totalWaves, screen }) {
-  if (screen === "setup") return null;
+  if (screen === "setup" || screen === "seat-arrange") return null;
   const dots = Array.from({ length: totalWaves }, (_, i) => i + 1);
   return (
     <div style={styles.header}>
@@ -677,34 +872,182 @@ function SetupScreen({ players, nameInput, setNameInput, addPlayer, removePlayer
   );
 }
 
-function WaveIntro({ wave, totalWaves, players, onStart }) {
-  const twoPlayer = players.length === 2;
-  const handSize = twoPlayer ? 7 : 5;
+function SeatArrangeScreen({ playerName, index, total, tempPick, onPick, onConfirm, onSkip }) {
+  function handleTap(e) {
+    const x = (e.clientX / window.innerWidth) * 100;
+    const y = (e.clientY / window.innerHeight) * 100;
+    onPick(x, y);
+  }
+  return (
+    <>
+      <div onClick={handleTap} style={{ position: "fixed", inset: 0, zIndex: 30, cursor: "crosshair" }} />
+      <div style={{ ...styles.panel, position: "relative", zIndex: 31 }}>
+        <div style={{ pointerEvents: "none" }}>
+          <div style={styles.eyebrow}>SEATING · PLAYER {index + 1} OF {total}</div>
+          <h1 style={styles.h1}>{playerName}, Tap Your Seat</h1>
+          <p style={styles.subtitle}>
+            Hand the device around the table. {playerName} reaches out and taps the spot on the screen closest to
+            where they're sitting — that's where their bidding circle will stay for the whole match.
+          </p>
+        </div>
+        <div style={{ pointerEvents: "auto", display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
+          <button
+            style={{ ...styles.primaryBtn, opacity: tempPick ? 1 : 0.4 }}
+            disabled={!tempPick}
+            onClick={onConfirm}
+          >
+            <ChevronRight size={18} />
+            {tempPick ? `Confirm ${playerName}'s Spot` : "Tap Anywhere on Screen First"}
+          </button>
+          <button style={styles.secondaryBtn} onClick={onSkip}>
+            Skip — Use Default Layout Instead
+          </button>
+        </div>
+      </div>
+      {tempPick && (
+        <div
+          style={{
+            position: "fixed",
+            left: `${tempPick.x}%`,
+            top: `${tempPick.y}%`,
+            transform: "translate(-50%, -50%)",
+            width: "clamp(80px, 24vw, 106px)",
+            height: "clamp(80px, 24vw, 106px)",
+            borderRadius: "50%",
+            border: "2px solid #D4AF37",
+            background: "rgba(212,175,55,0.18)",
+            boxShadow: "0 0 24px rgba(212,175,55,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "'Cinzel', serif",
+            fontWeight: 700,
+            color: "#F2CB6B",
+            fontSize: 14,
+            zIndex: 32,
+            pointerEvents: "none",
+            padding: 6,
+            textAlign: "center",
+          }}
+        >
+          {playerName}
+        </div>
+      )}
+    </>
+  );
+}
+
+function HandDealScreen({ wave, totalWaves, hand, index, total, phase, onReveal, onNext }) {
+  if (!hand) return null;
+  const isLast = index + 1 >= total;
+
+  if (phase === "pass") {
+    return (
+      <div style={styles.panel}>
+        <div style={styles.eyebrow}>WAVE {wave} OF {totalWaves} · DEALING</div>
+        <h1 style={styles.h1}>Pass to {hand.name}</h1>
+        <p style={styles.subtitle}>
+          Player {index + 1} of {total}. Make sure only {hand.name} is looking at the screen, then tap below to
+          reveal their hand.
+        </p>
+        <button style={styles.primaryBtn} onClick={onReveal}>
+          <Sparkles size={18} />
+          I'm {hand.name} — Show Me My Cards
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.panel}>
-      <div style={styles.eyebrow}>WAVE {wave} OF {totalWaves}</div>
-      <h1 style={styles.h1}>Draw Your Hand</h1>
-      <p style={styles.subtitle}>Each player draws {handSize} cards from the shared deck.</p>
+      <div style={styles.eyebrow}>WAVE {wave} OF {totalWaves} · DEALING</div>
+      <h1 style={styles.h1}>{hand.name}'s Hand</h1>
+      <p style={styles.subtitle}>
+        Everyone this wave gets a hand worth the same total — different cards, equal value. Take these{" "}
+        {hand.cards.length} cards, then hide them from the table before passing the device on.
+      </p>
 
       <div style={styles.instructionBox}>
-        <div style={styles.instructionStep}>
-          <span style={styles.stepNum}>1</span>
-          <span>Shuffle the discard pile back in if the draw pile is short.</span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center", padding: "8px 0" }}>
+          {hand.cards.map((v, i) => (
+            <div
+              key={i}
+              style={{
+                width: 46,
+                height: 62,
+                borderRadius: 8,
+                border: "1px solid #D4AF37",
+                background: "linear-gradient(160deg, #1B2438, #0F1626)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontFamily: "'Cinzel', serif",
+                fontWeight: 700,
+                fontSize: 20,
+                color: "#F2CB6B",
+                boxShadow: "0 0 14px rgba(212,175,55,0.25)",
+              }}
+            >
+              {v}
+            </div>
+          ))}
         </div>
-        <div style={styles.instructionStep}>
-          <span style={styles.stepNum}>2</span>
-          <span>Deal {handSize} cards face-down to each of the {players.length} players.</span>
+        <div style={{ textAlign: "center", marginTop: 6, color: "#8A93A8", fontSize: 12 }}>
+          Hand total: {hand.cards.reduce((s, v) => s + v, 0)}
         </div>
-        {twoPlayer && (
-          <div style={styles.instructionStep}>
-            <span style={styles.stepNum}>!</span>
-            <span>2 extra cards each — a buffer so a tie-break earlier in the wave doesn't leave you with nothing to bid for the last asset.</span>
-          </div>
-        )}
-        <div style={styles.instructionStep}>
-          <span style={styles.stepNum}>{twoPlayer ? 4 : 3}</span>
-          <span>Keep your hand hidden. When everyone's ready, begin the auction.</span>
-        </div>
+      </div>
+
+      <button style={styles.primaryBtn} onClick={onNext}>
+        <ChevronRight size={18} />
+        {isLast ? "Hidden — All Hands Dealt, Continue" : "Hidden — Pass to Next Player"}
+      </button>
+    </div>
+  );
+}
+
+function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
+  const total = assets.reduce((s, a) => s + a.value, 0);
+  return (
+    <div style={styles.panel}>
+      <div style={styles.eyebrow}>WAVE {wave} OF {totalWaves} · PREVIEW</div>
+      <h1 style={styles.h1}>This Round's Treasures</h1>
+      <p style={styles.subtitle}>
+        All {assets.length} items up for auction this round, worth {total} total. Study them and plan which ones
+        are worth your best cards before bidding begins.
+      </p>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "10px 0 18px" }}>
+        {assets
+          .slice()
+          .sort((a, b) => b.value - a.value)
+          .map((a) => {
+            const tier = TIER_STYLE[a.tier];
+            return (
+              <div
+                key={a.key}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: `1px solid ${tier.color}55`,
+                  background: "rgba(19,27,46,0.6)",
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#E8DCC0" }}>{a.name}</span>
+                  <span style={{ fontSize: 10, color: tier.color, letterSpacing: 0.4 }}>{tier.label.toUpperCase()}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <AnkhIcon size={16} color="#F2CB6B" />
+                  <span style={{ fontFamily: "'Cinzel', serif", fontWeight: 700, color: "#F2CB6B", fontSize: 16 }}>
+                    {a.value}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
       </div>
 
       <button style={styles.primaryBtn} onClick={onStart}>
@@ -715,7 +1058,7 @@ function WaveIntro({ wave, totalWaves, players, onStart }) {
   );
 }
 
-function AuctionScreen({ asset, index, players, tieRound, bidders, toggleBid, timeLeft, onTimeUp }) {
+function AuctionScreen({ asset, index, waveAssets, players, seatPositions, tieRound, bidders, toggleBid, timeLeft, onTimeUp }) {
   const tier = TIER_STYLE[asset.tier];
   const bidderCount = Object.keys(bidders).length;
   const pct = timeLeft / 15;
@@ -724,6 +1067,39 @@ function AuctionScreen({ asset, index, players, tieRound, bidders, toggleBid, ti
   return (
     <div style={styles.panel}>
       <div style={styles.eyebrow}>{tieRound ? "TIE-BREAKER ROUND" : `ASSET ${index + 1} OF 5`}</div>
+
+      {!tieRound && waveAssets && waveAssets.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 4, flexWrap: "wrap", justifyContent: "center" }}>
+          {waveAssets.map((a, i) => {
+            const claimed = i < index;
+            const isCurrent = i === index;
+            return (
+              <div
+                key={a.key}
+                title={a.name}
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 6,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  fontFamily: "'Cinzel', serif",
+                  border: isCurrent ? "1px solid #D4AF37" : "1px solid #2A3348",
+                  color: claimed ? "#4A5266" : isCurrent ? "#F2CB6B" : "#8A93A8",
+                  background: claimed ? "rgba(19,27,46,0.3)" : isCurrent ? "rgba(212,175,55,0.15)" : "rgba(19,27,46,0.6)",
+                  textDecoration: claimed ? "line-through" : "none",
+                  opacity: claimed ? 0.5 : 1,
+                }}
+              >
+                {a.value}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div
         style={{
@@ -766,13 +1142,15 @@ function AuctionScreen({ asset, index, players, tieRound, bidders, toggleBid, ti
 
       <p style={styles.instructionLine}>
         {tieRound
-          ? `Tied players only: ${players.join(", ")} — draw a fresh card from the shared pile (not your wave hand) and tap your circle to bid again for this same asset.`
+          ? `Tied players only: ${players.join(", ")} — keep your original card face-down and place ONE more card on top of it from your hand. Tap your circle when it's placed. On reveal, add both cards together — highest total wins.`
           : "Place your card face-down on the table now, then tap the circle on your side of the screen to confirm you're bidding — before the timer runs out."}
       </p>
 
       {players.map((p, i) => {
         const active = !!bidders[p];
-        const pos = bidCircleLayout(players.length)[i];
+        const custom = seatPositions && seatPositions[p];
+        const pos = custom || bidCircleLayout(players.length)[i];
+        const rotate = custom ? 0 : pos.rotate;
         return (
           <button
             key={p}
@@ -781,7 +1159,7 @@ function AuctionScreen({ asset, index, players, tieRound, bidders, toggleBid, ti
               ...styles.bidCircle,
               left: `${pos.x}%`,
               top: `${pos.y}%`,
-              transform: `translate(-50%, -50%) rotate(${pos.rotate}deg)`,
+              transform: `translate(-50%, -50%) rotate(${rotate}deg)`,
               borderColor: active ? "#D4AF37" : "#2A3348",
               background: active ? "rgba(212,175,55,0.18)" : "rgba(19,27,46,0.92)",
               boxShadow: active ? "0 0 24px rgba(212,175,55,0.5)" : "0 4px 16px rgba(0,0,0,0.35)",
@@ -834,6 +1212,12 @@ function RevealScreen({ asset, bidders, onDeclareWinner, onUnclaimed, onTie }) {
             <button style={styles.tieBtn} onClick={onTie}>
               It's a Tie — Pick Who
             </button>
+          )}
+          {names.length >= 2 && (
+            <p style={styles.hintSmall}>
+              Tie? Tied players stack one more card on top of their bid and reveal the combined total. Still tied
+              after that — do it again.
+            </p>
           )}
         </>
       )}
