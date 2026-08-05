@@ -419,7 +419,7 @@ export default function App() {
     return drawn;
   }
 
-  const handSizeFor = (n) => (n === 2 ? 7 : 5);
+  const handSizeFor = (n) => 5;
 
   // Deal this wave's hands (equal totals, shaped to minimize card overlap between
   // players) and draw this wave's 5 assets — both happen up front so the preview
