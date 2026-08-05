@@ -1043,15 +1043,14 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
       <div style={styles.eyebrow}>WAVE {wave} OF {totalWaves} · PREVIEW</div>
       <h1 style={styles.h1}>This Round's Treasures</h1>
       <p style={styles.subtitle}>
-        All {assets.length} items up for auction this round, worth {total} total. Study them and plan which ones
-        are worth your best cards before bidding begins.
+        {assets.length} items, worth {total} total. Study them before bidding begins.
       </p>
 
-      <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10, margin: "12px 0 18px" }}>
-        <Tile a={hero} imgH={150} valSize={38} />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8, margin: "8px 0 12px" }}>
+        <Tile a={hero} imgH="clamp(80px, 22vh, 150px)" valSize={34} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {rest.map((a) => (
-            <Tile key={a.key} a={a} imgH={104} valSize={26} />
+            <Tile key={a.key} a={a} imgH="clamp(56px, 14vh, 104px)" valSize={24} />
           ))}
         </div>
       </div>
@@ -1379,7 +1378,7 @@ function FinalScreen({ ranked, netWorth, onReset }) {
 // ---------- Styles ----------
 const styles = {
   appRoot: {
-    minHeight: "100vh",
+    height: "100dvh",
     width: "100%",
     background: "#0A0E17",
     fontFamily: "'Inter', sans-serif",
@@ -1389,7 +1388,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    padding: "24px 16px",
+    padding: "16px",
   },
   vignette: {
     position: "absolute",
