@@ -1005,6 +1005,7 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
       style={{
         flex: `${grow} ${grow} 0%`,
         minHeight: 0,
+        minWidth: 0,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -1016,12 +1017,27 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
         background: "linear-gradient(180deg, rgba(19,27,46,0.75) 0%, rgba(13,18,32,0.9) 100%)",
       }}
     >
-      <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", width: "100%" }}>
+      <div
+        style={{
+          flex: "1 1 auto",
+          minHeight: 0,
+          minWidth: 0,
+          width: "100%",
+          position: "relative",
+        }}
+      >
         {ASSET_IMAGES[a.key] && (
           <img
             src={ASSET_IMAGES[a.key]}
             alt=""
-            style={{ maxHeight: "100%", maxWidth: "100%", objectFit: "contain", display: "block" }}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              display: "block",
+            }}
           />
         )}
       </div>
