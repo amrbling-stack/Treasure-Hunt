@@ -1001,22 +1001,22 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
   const rest = sorted.slice(1);
 
   const Tile = ({ a, grow, valSize }) => (
-    <div
-      style={{
-        flex: `${grow} ${grow} 0%`,
-        minHeight: 0,
-        minWidth: 0,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "flex-end",
-        gap: 4,
-        padding: "8px 10px 8px",
-        borderRadius: 14,
-        border: "1px solid #232C42",
-        background: "linear-gradient(180deg, rgba(19,27,46,0.75) 0%, rgba(13,18,32,0.9) 100%)",
-      }}
-    >
+      <div
+        style={{
+          flex: `${grow} ${grow} 0%`,
+          minHeight: 0,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: 2,
+          padding: "5px 6px 5px",
+          borderRadius: 14,
+          border: "1px solid #232C42",
+          background: "linear-gradient(180deg, rgba(19,27,46,0.75) 0%, rgba(13,18,32,0.9) 100%)",
+        }}
+      >
       <div
         style={{
           flex: "1 1 auto",
@@ -1061,8 +1061,7 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
     <div
       style={{
         ...styles.panel,
-        flex: "1 1 auto",
-        minHeight: 0,
+        height: "calc(100dvh - 72px)",
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
@@ -1070,9 +1069,9 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
     >
       <div style={{ flexShrink: 0 }}>
         <div style={styles.eyebrow}>WAVE {wave} OF {totalWaves} · PREVIEW</div>
-        <h1 style={styles.h1}>This Round's Treasures</h1>
-        <p style={styles.subtitle}>
-          {assets.length} items, worth {total} total. Study them before bidding begins.
+        <h1 style={{ ...styles.h1, fontSize: 22 }}>This Round's Treasures</h1>
+        <p style={{ ...styles.subtitle, margin: "0 0 4px 0" }}>
+          {assets.length} items, worth {total} total.
         </p>
       </div>
 
@@ -1083,14 +1082,21 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
           width: "100%",
           display: "flex",
           flexDirection: "column",
-          gap: 8,
-          margin: "8px 0 12px",
+          gap: 6,
+          margin: "6px 0 8px",
         }}
       >
-        <Tile a={hero} grow={1.3} valSize={30} />
-        <div style={{ flex: "1 1 0%", minHeight: 0, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {rest.map((a) => (
-            <Tile key={a.key} a={a} grow={1} valSize={22} />
+        <Tile a={hero} grow={1.15} valSize={26} />
+        <div style={{ flex: "1 1 0%", minHeight: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+          {Array.from({ length: Math.ceil(rest.length / 2) }, (_, rowIdx) => (
+            <div
+              key={rowIdx}
+              style={{ flex: "1 1 0%", minHeight: 0, display: "flex", flexDirection: "row", gap: 6 }}
+            >
+              {rest.slice(rowIdx * 2, rowIdx * 2 + 2).map((a) => (
+                <Tile key={a.key} a={a} grow={1} valSize={19} />
+              ))}
+            </div>
           ))}
         </div>
       </div>
