@@ -997,8 +997,6 @@ function HandDealScreen({ wave, totalWaves, hand, index, total, phase, onReveal,
 function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
   const total = assets.reduce((s, a) => s + a.value, 0);
   const sorted = assets.slice().sort((a, b) => b.value - a.value);
-  const hero = sorted[0];
-  const rest = sorted.slice(1);
 
   const Tile = ({ a, grow, valSize }) => (
       <div
@@ -1086,19 +1084,16 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
           margin: "6px 0 8px",
         }}
       >
-        <Tile a={hero} grow={1.15} valSize={26} />
-        <div style={{ flex: "1 1 0%", minHeight: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-          {Array.from({ length: Math.ceil(rest.length / 2) }, (_, rowIdx) => (
-            <div
-              key={rowIdx}
-              style={{ flex: "1 1 0%", minHeight: 0, display: "flex", flexDirection: "row", gap: 6 }}
-            >
-              {rest.slice(rowIdx * 2, rowIdx * 2 + 2).map((a) => (
-                <Tile key={a.key} a={a} grow={1} valSize={19} />
-              ))}
-            </div>
-          ))}
-        </div>
+        {Array.from({ length: Math.ceil(sorted.length / 2) }, (_, rowIdx) => (
+          <div
+            key={rowIdx}
+            style={{ flex: "1 1 0%", minHeight: 0, display: "flex", flexDirection: "row", gap: 6 }}
+          >
+            {sorted.slice(rowIdx * 2, rowIdx * 2 + 2).map((a) => (
+              <Tile key={a.key} a={a} grow={1} valSize={22} />
+            ))}
+          </div>
+        ))}
       </div>
 
       <button style={{ ...styles.primaryBtn, flexShrink: 0 }} onClick={onStart}>
