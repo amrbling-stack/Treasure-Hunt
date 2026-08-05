@@ -1000,21 +1000,23 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
   const hero = sorted[0];
   const rest = sorted.slice(1);
 
-  const Tile = ({ a, imgH, valSize }) => (
+  const Tile = ({ a, grow, valSize }) => (
     <div
       style={{
+        flex: `${grow} ${grow} 0%`,
+        minHeight: 0,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "flex-end",
-        gap: 6,
-        padding: "12px 10px 10px",
+        gap: 4,
+        padding: "8px 10px 8px",
         borderRadius: 14,
         border: "1px solid #232C42",
         background: "linear-gradient(180deg, rgba(19,27,46,0.75) 0%, rgba(13,18,32,0.9) 100%)",
       }}
     >
-      <div style={{ height: imgH, display: "flex", alignItems: "center", justifyContent: "center", width: "100%" }}>
+      <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", width: "100%" }}>
         {ASSET_IMAGES[a.key] && (
           <img
             src={ASSET_IMAGES[a.key]}
@@ -1025,6 +1027,7 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
       </div>
       <span
         style={{
+          flexShrink: 0,
           fontFamily: "'Cinzel', serif",
           fontWeight: 900,
           fontSize: valSize,
@@ -1039,23 +1042,44 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
   );
 
   return (
-    <div style={styles.panel}>
-      <div style={styles.eyebrow}>WAVE {wave} OF {totalWaves} · PREVIEW</div>
-      <h1 style={styles.h1}>This Round's Treasures</h1>
-      <p style={styles.subtitle}>
-        {assets.length} items, worth {total} total. Study them before bidding begins.
-      </p>
+    <div
+      style={{
+        ...styles.panel,
+        flex: "1 1 auto",
+        minHeight: 0,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <div style={{ flexShrink: 0 }}>
+        <div style={styles.eyebrow}>WAVE {wave} OF {totalWaves} · PREVIEW</div>
+        <h1 style={styles.h1}>This Round's Treasures</h1>
+        <p style={styles.subtitle}>
+          {assets.length} items, worth {total} total. Study them before bidding begins.
+        </p>
+      </div>
 
-      <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8, margin: "8px 0 12px" }}>
-        <Tile a={hero} imgH="clamp(80px, 22vh, 150px)" valSize={34} />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+      <div
+        style={{
+          flex: "1 1 auto",
+          minHeight: 0,
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          margin: "8px 0 12px",
+        }}
+      >
+        <Tile a={hero} grow={1.3} valSize={30} />
+        <div style={{ flex: "1 1 0%", minHeight: 0, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {rest.map((a) => (
-            <Tile key={a.key} a={a} imgH="clamp(56px, 14vh, 104px)" valSize={24} />
+            <Tile key={a.key} a={a} grow={1} valSize={22} />
           ))}
         </div>
       </div>
 
-      <button style={styles.primaryBtn} onClick={onStart}>
+      <button style={{ ...styles.primaryBtn, flexShrink: 0 }} onClick={onStart}>
         <Sparkles size={18} />
         Start the Auction
       </button>
@@ -1400,6 +1424,8 @@ const styles = {
     position: "relative",
     width: "100%",
     maxWidth: 460,
+    maxHeight: "calc(100dvh - 32px)",
+    minHeight: 0,
     display: "flex",
     flexDirection: "column",
     gap: 18,
@@ -1416,6 +1442,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "0 4px",
+    flexShrink: 0,
   },
   headerTitle: { display: "flex", alignItems: "center", gap: 8 },
   headerTitleText: {
