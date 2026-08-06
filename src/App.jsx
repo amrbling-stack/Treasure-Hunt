@@ -1297,21 +1297,17 @@ function AuctionScreen({ asset, index, waveAssets, players, seatPositions, tieRo
           );
         })()}
         <div style={styles.assetValueRow}>
-          {hideValue ? (
-            <span style={{ fontSize: 13, color: "#8A93A8", fontStyle: "italic" }}>
-              Value hidden — what was it worth?
-            </span>
-          ) : (
-            <span style={styles.assetValue}>{asset.value}</span>
-          )}
+          {!hideValue && <span style={styles.assetValue}>{asset.value}</span>}
         </div>
       </div>
 
-      <p style={styles.instructionLine}>
-        {tieRound
-          ? `Tied players only: ${players.join(", ")} — keep your original card face-down and place ONE more card on top of it from your hand. Tap your circle when it's placed. On reveal, add both cards together — highest total wins.`
-          : "Place your card face-down on the table now, then tap the circle on your side of the screen to confirm you're bidding — before the timer runs out."}
-      </p>
+      {tieRound && (
+        <p style={styles.instructionLine}>
+          Tied players only: {players.join(", ")} — keep your original card face-down and place ONE more card on
+          top of it from your hand. Tap your circle when it's placed. On reveal, add both cards together — highest
+          total wins.
+        </p>
+      )}
 
       {players.map((p, i) => {
         const active = !!bidders[p];
