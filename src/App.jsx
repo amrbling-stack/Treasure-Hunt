@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Plus, X, Crown, Coins, Users, Play, ChevronRight, Trophy, Sparkles } from "lucide-react";
 
 // ---------- Design tokens ----------
@@ -768,6 +768,7 @@ export default function App() {
             players={players}
             assets={waveAssets}
             onStart={beginWaveAuction}
+            memorizeTimer={memoryFinalWave && wave === totalWaves ? 20 : null}
           />
         )}
 
@@ -1091,9 +1092,33 @@ function HandDealScreen({ wave, totalWaves, hand, index, total, phase, onReveal,
   );
 }
 
-function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
+function WaveIntro({ wave, totalWaves, players, assets, onStart, memorizeTimer }) {
   const total = assets.reduce((s, a) => s + a.value, 0);
   const sorted = assets.slice().sort((a, b) => b.value - a.value);
+
+  const [countdown, setCountdown] = useState(memorizeTimer);
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+    startedRef.current = false;
+    setCountdown(memorizeTimer);
+    if (memorizeTimer == null) return;
+    const id = setInterval(() => {
+      setCountdown((s) => {
+        if (s <= 1) {
+          clearInterval(id);
+          if (!startedRef.current) {
+            startedRef.current = true;
+            onStart();
+          }
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memorizeTimer, wave]);
 
   const Tile = ({ a, grow, valSize }) => (
       <div
@@ -1163,11 +1188,40 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
       }}
     >
       <div style={{ flexShrink: 0 }}>
-        <div style={styles.eyebrow}>WAVE {wave} OF {totalWaves} · PREVIEW</div>
+        <div style={styles.eyebrow}>
+          {memorizeTimer != null ? "MEMORIZE — FINAL WAVE" : `WAVE ${wave} OF ${totalWaves} · PREVIEW`}
+        </div>
         <h1 style={{ ...styles.h1, fontSize: 22 }}>This Round's Treasures</h1>
-        <p style={{ ...styles.subtitle, margin: "0 0 4px 0" }}>
-          {assets.length} items, worth {total} total.
-        </p>
+        {memorizeTimer != null ? (
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              margin: "2px 0 4px",
+              padding: "3px 12px",
+              borderRadius: 999,
+              border: "1px solid rgba(212,175,55,0.4)",
+              background: "rgba(212,175,55,0.08)",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "'Cinzel', serif",
+                fontWeight: 900,
+                fontSize: 15,
+                color: countdown <= 5 ? "#E05555" : "#F2CB6B",
+              }}
+            >
+              {countdown}s
+            </span>
+            <span style={{ fontSize: 11, color: "#9BA3B5" }}>to memorize — bidding starts automatically</span>
+          </div>
+        ) : (
+          <p style={{ ...styles.subtitle, margin: "0 0 4px 0" }}>
+            {assets.length} items, worth {total} total.
+          </p>
+        )}
       </div>
 
       <div
@@ -1193,9 +1247,9 @@ function WaveIntro({ wave, totalWaves, players, assets, onStart }) {
         ))}
       </div>
 
-      <button style={{ ...styles.primaryBtn, flexShrink: 0 }} onClick={onStart}>
+      <button style={{ ...styles.primaryBtn, flexShrink: 0 }} onClick={() => { startedRef.current = true; onStart(); }}>
         <Sparkles size={18} />
-        Start the Auction
+        {memorizeTimer != null ? "I'm Ready — Start Now" : "Start the Auction"}
       </button>
     </div>
   );
