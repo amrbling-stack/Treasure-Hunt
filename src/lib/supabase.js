@@ -1,16 +1,18 @@
 import { createClient } from "@supabase/supabase-js";
 
-// These come from Vercel project env vars (Settings -> Environment Variables):
-//   VITE_SUPABASE_URL
-//   VITE_SUPABASE_ANON_KEY
-// Get both from the Supabase dashboard for this project -> Settings -> API.
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Public Supabase project + anon key for Kanz match results.
+// Anon keys are safe to ship client-side by design — Row Level Security on the
+// `game_sessions` table is what actually protects data, not key secrecy.
+// Vercel env vars (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) still override
+// these if set, for flexibility later (e.g. switching projects/environments).
+const FALLBACK_URL = "https://ewyugaxgvusoxzuvuvdw.supabase.co";
+const FALLBACK_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV3eXVnYXhndnVzb3h6dXZ1dmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2NTIxMDgsImV4cCI6MjEwMDIyODEwOH0.qysgChICcRsfgBdO8ZiryfyYNp0Q5XToAsTqqQhmYjE";
 
-// If env vars aren't set (e.g. local dev without a .env file), export null and
-// let callers no-op instead of crashing the app.
-export const supabase =
-  supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || FALLBACK_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || FALLBACK_ANON_KEY;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
  * Fire-and-forget save of a completed match's results.
