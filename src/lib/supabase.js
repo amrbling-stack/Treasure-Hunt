@@ -1,13 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 
-// Public Supabase project + anon key for Kanz match results.
-// Anon keys are safe to ship client-side by design — Row Level Security on the
-// `game_sessions` table is what actually protects data, not key secrecy.
+// Dedicated Supabase project for Kanz match/analytics data (project: "kanz").
+// Anon keys are safe to ship client-side by design — Row Level Security on
+// each table is what actually protects data, not key secrecy.
 // Vercel env vars (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) still override
 // these if set, for flexibility later (e.g. switching projects/environments).
-const FALLBACK_URL = "https://ewyugaxgvusoxzuvuvdw.supabase.co";
+const FALLBACK_URL = "https://tghuwknvudejhreyfutf.supabase.co";
 const FALLBACK_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV3eXVnYXhndnVzb3h6dXZ1dmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2NTIxMDgsImV4cCI6MjEwMDIyODEwOH0.qysgChICcRsfgBdO8ZiryfyYNp0Q5XToAsTqqQhmYjE";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRnaHV3a252dWRlamhyZXlmdXRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY3MTc5NjIsImV4cCI6MjEwMjI5Mzk2Mn0.VGkVP3zq5tpUAc2OrlzgIjShtU9Q8uA3d-hDnpVuY8M";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || FALLBACK_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || FALLBACK_ANON_KEY;
@@ -15,10 +15,11 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || FALLBACK_ANON_
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * Fire-and-forget save of a completed match's results.
+ * Fire-and-forget save of a completed match's summary result.
  * Never throws — a failed save should never break the game UI.
  */
 export async function saveGameSession({
+  matchId,
   players,
   netWorth,
   ranked,
@@ -26,10 +27,9 @@ export async function saveGameSession({
   lang,
   memoryFinalWave,
 }) {
-  if (!supabase) return;
-
   try {
     await supabase.from("game_sessions").insert({
+      match_id: matchId,
       player_count: players.length,
       players: players.map((name) => ({ name, score: netWorth[name] || 0 })),
       winner_name: ranked[0] ?? null,
@@ -38,7 +38,50 @@ export async function saveGameSession({
       memory_challenge: memoryFinalWave,
     });
   } catch (err) {
-    // Swallow errors — a bad network shouldn't block the "New Game" flow.
     console.error("saveGameSession failed:", err);
   }
 }
+
+/**
+ * Fire-and-forget log of a single asset's bid resolution (one per asset, every
+ * wave). This is the real balance-analysis data: which assets get bid up,
+ * which sit unclaimed, how often ties/clashes happen, how fast rounds close.
+ * Never throws — a failed log should never break the game UI.
+ */
+export async function logAssetEvent({
+  matchId,
+  wave,
+  assetIndexInWave,
+  asset, // { key, name, value, tier }
+  forcedClashWave,
+  tieBreakRound,
+  participants, // array of names who bid
+  winnerName, // null if unclaimed
+  unclaimed,
+  decidedEarly,
+  secondsLeftAtClose,
+}) {
+  try {
+    await supabase.from("asset_events").insert({
+      match_id: matchId,
+      wave,
+      asset_index_in_wave: assetIndexInWave,
+      asset_key: asset.key,
+      asset_name: asset.name,
+      asset_value: asset.value,
+      asset_tier: asset.tier,
+      legendary: asset.value >= 10,
+      forced_clash_wave: !!forcedClashWave,
+      tie_break_round: !!tieBreakRound,
+      participant_count: participants.length,
+      participants,
+      winner_name: winnerName ?? null,
+      unclaimed: !!unclaimed,
+      decided_early: !!decidedEarly,
+      seconds_left_at_close: secondsLeftAtClose ?? null,
+    });
+  } catch (err) {
+    console.error("logAssetEvent failed:", err);
+  }
+}
+
