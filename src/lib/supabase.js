@@ -96,6 +96,7 @@ export async function logAssetEvent({
   tieBreakRound,
   participants, // array of names who bid
   winnerName, // null if unclaimed
+  winningCardValue, // the actual card value the winner played, null if unclaimed
   unclaimed,
   decidedEarly,
   secondsLeftAtClose,
@@ -115,6 +116,7 @@ export async function logAssetEvent({
       participant_count: participants.length,
       participants,
       winner_name: winnerName ?? null,
+      winning_card_value: winningCardValue ?? null,
       unclaimed: !!unclaimed,
       decided_early: !!decidedEarly,
       seconds_left_at_close: secondsLeftAtClose ?? null,
