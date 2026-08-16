@@ -26,6 +26,7 @@ export async function saveGameSession({
   totalWaves,
   lang,
   memoryFinalWave,
+  durationSeconds,
 }) {
   try {
     await supabase.from("game_sessions").insert({
@@ -36,9 +37,47 @@ export async function saveGameSession({
       wave_count: totalWaves,
       language: lang,
       memory_challenge: memoryFinalWave,
+      duration_seconds: durationSeconds ?? null,
     });
   } catch (err) {
     console.error("saveGameSession failed:", err);
+  }
+}
+
+/**
+ * Fire-and-forget log of one wave's dealt hands, one row per player.
+ * This is the fairness-analysis data: exact cards dealt per seat position,
+ * per player count, so seat-position bias (or lack of it) can be checked
+ * against real play rather than only simulation.
+ * Never throws — a failed log should never break the game UI.
+ */
+export async function logHandDeal({
+  matchId,
+  wave,
+  playerCount,
+  forcedClashWave,
+  overlapScore,
+  fallbackUsed,
+  hands, // array of { name, cards } in seat order
+}) {
+  try {
+    const rows = hands.map((h, seatIndex) => ({
+      match_id: matchId,
+      wave,
+      player_count: playerCount,
+      seat_index: seatIndex,
+      player_name: h.name,
+      hand_size: h.cards.length,
+      cards: h.cards,
+      hand_total: h.cards.reduce((s, v) => s + v, 0),
+      max_card: Math.max(...h.cards),
+      forced_clash_wave: !!forcedClashWave,
+      overlap_score: overlapScore ?? null,
+      fallback_used: !!fallbackUsed,
+    }));
+    await supabase.from("hand_deals").insert(rows);
+  } catch (err) {
+    console.error("logHandDeal failed:", err);
   }
 }
 
