@@ -601,7 +601,7 @@ function Confetti({ legendary = false }) {
 }
 
 export default function App() {
-  const [lang, setLang] = useState("en"); // en | ar -- UI text only, all numbers always render as plain digits
+  const [lang] = useState("en"); // UI text only, all numbers always render as plain digits — language switcher removed, English is the fixed default
   const [screen, setScreen] = useState("setup"); // setup | seat-arrange | auction | reveal | tie-select | asset-result | final
   const [players, setPlayers] = useState([]);
   const [aiPlayerNames, setAiPlayerNames] = useState([]); // subset of players[] that are AI-controlled
@@ -1077,7 +1077,6 @@ export default function App() {
       <div style={styles.vignette} />
 
       <div style={styles.stage}>
-        <LangToggle lang={lang} setLang={setLang} />
         {screen !== "setup" && screen !== "seat-arrange" && (
           <PacingHUD lang={lang} totalRemaining={assetsRemainingAfterCurrent} bands={bandsRemaining} />
         )}
@@ -1233,27 +1232,6 @@ function HowToPlayModal({ lang, slide, onNext, onBack, onClose }) {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function LangToggle({ lang, setLang }) {
-  return (
-    <div style={styles.langToggleWrap}>
-      <button
-        type="button"
-        onClick={() => setLang("en")}
-        style={{ ...styles.langBtn, ...(lang === "en" ? styles.langBtnActive : {}) }}
-      >
-        English
-      </button>
-      <button
-        type="button"
-        onClick={() => setLang("ar")}
-        style={{ ...styles.langBtn, ...(lang === "ar" ? styles.langBtnActive : {}) }}
-      >
-        العربية
-      </button>
     </div>
   );
 }
@@ -1811,30 +1789,6 @@ const styles = {
     justifyContent: "space-between",
     padding: "0 4px",
     flexShrink: 0,
-  },
-  langToggleWrap: {
-    display: "flex",
-    justifyContent: "center",
-    gap: 6,
-    flexShrink: 0,
-    padding: "0 4px",
-  },
-  langBtn: {
-    background: "transparent",
-    color: "#6E7691",
-    border: "1px solid #2A3348",
-    borderRadius: 999,
-    padding: "5px 14px",
-    fontSize: 11,
-    fontWeight: 700,
-    fontFamily: "'Inter', sans-serif",
-    cursor: "pointer",
-    letterSpacing: "0.03em",
-  },
-  langBtnActive: {
-    background: "rgba(212,175,55,0.14)",
-    color: "#F2CB6B",
-    borderColor: "#D4AF37",
   },
   headerTitle: { display: "flex", alignItems: "center", gap: 8 },
   headerTitleText: {
