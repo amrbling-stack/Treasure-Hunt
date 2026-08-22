@@ -165,8 +165,6 @@ const STR = {
     revealEyebrow: "REVEAL",
     revealNoBids: "No one bid on this asset.",
     revealPrompt: "Everyone reveal your card on the table now. Tap whoever played the highest number.",
-    cardSelectPrompt: (name) => `Which card did ${name} play?`,
-    cardSelectDrawPrompt: (name) => `Which card did ${name} draw?`,
     continueUnclaimed: "Continue \u2014 Unclaimed",
     itsATie: "It's a Tie \u2014 Pick Who",
     tieHint: "Tie? Tied players each draw one card from the remaining deck and compare \u2014 highest wins. Still tied after that \u2014 draw again.",
@@ -238,8 +236,6 @@ const STR = {
     revealEyebrow: "\u0627\u0644\u0643\u0634\u0641",
     revealNoBids: "\u0644\u0645 \u064a\u0632\u0627\u064a\u062f \u0623\u062d\u062f \u0639\u0644\u0649 \u0647\u0630\u0647 \u0627\u0644\u0642\u0637\u0639\u0629.",
     revealPrompt: "\u0639\u0644\u0649 \u0627\u0644\u062c\u0645\u064a\u0639 \u0643\u0634\u0641 \u0628\u0637\u0627\u0642\u0627\u062a\u0647\u0645 \u0639\u0644\u0649 \u0627\u0644\u0637\u0627\u0648\u0644\u0629 \u0627\u0644\u0622\u0646. \u0627\u0636\u063a\u0637 \u0639\u0644\u0649 \u0645\u0646 \u0644\u0639\u0628 \u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0623\u0639\u0644\u0649.",
-    cardSelectPrompt: (name) => `\u0623\u064a \u0648\u0631\u0642\u0629 \u0644\u0639\u0628 ${name}\u061f`,
-    cardSelectDrawPrompt: (name) => `\u0623\u064a \u0648\u0631\u0642\u0629 \u0633\u062d\u0628 ${name}\u061f`,
     continueUnclaimed: "\u0645\u062a\u0627\u0628\u0639\u0629 \u2014 \u0628\u0644\u0627 \u0645\u0627\u0644\u0643",
     itsATie: "\u062a\u0639\u0627\u062f\u0644 \u2014 \u0627\u062e\u062a\u0631 \u0645\u0646",
     tieHint: "\u062a\u0639\u0627\u062f\u0644\u061f \u064a\u0633\u062d\u0628 \u0643\u0644 \u0644\u0627\u0639\u0628 \u0645\u062a\u0639\u0627\u062f\u0644 \u0628\u0637\u0627\u0642\u0629 \u0648\u0627\u062d\u062f\u0629 \u0645\u0646 \u0627\u0644\u0623\u0648\u0631\u0627\u0642 \u0627\u0644\u0645\u062a\u0628\u0642\u064a\u0629 \u0648\u064a\u0642\u0627\u0631\u0646\u0648\u0646 \u2014 \u0627\u0644\u0623\u0639\u0644\u0649 \u064a\u0641\u0648\u0632. \u0648\u0625\u0630\u0627 \u0627\u0633\u062a\u0645\u0631 \u0627\u0644\u062a\u0639\u0627\u062f\u0644 \u0628\u0639\u062f \u0630\u0644\u0643 \u2014 \u0627\u0633\u062d\u0628\u0648\u0627 \u0645\u062c\u062f\u062f\u0627\u064b.",
@@ -502,7 +498,6 @@ export default function App() {
   const [currentAsset, setCurrentAsset] = useState(null);
   const [assetsSeen, setAssetsSeen] = useState(0); // how many assets have been drawn so far this match (1-indexed order)
   const [dealtHands, setDealtHands] = useState([]); // array of {name, cards:[..]} — each player's REMAINING unspent cards, persists for the whole match
-  const [pendingWinner, setPendingWinner] = useState(null); // name awaiting card-value confirmation
   const [seatPositions, setSeatPositions] = useState({}); // name -> {x,y} percent-of-screen, tapped once per match
   const [seatArrangeIndex, setSeatArrangeIndex] = useState(0);
   const [tempSeatPick, setTempSeatPick] = useState(null);
@@ -685,29 +680,14 @@ export default function App() {
 
   function pickWinner(name) {
     sfx.uiClick();
-    setPendingWinner(name);
-    setScreen("card-select");
+    declareWinner(name);
   }
 
-  // Remove one instance of `value` from a player's remaining hand — a spent
-  // card can never be played again this match.
-  function spendCard(hands, name, value) {
-    return hands.map((h) => {
-      if (h.name !== name) return h;
-      const idx = h.cards.indexOf(value);
-      if (idx === -1) return h; // shouldn't happen, but never crash the game over it
-      const nextCards = h.cards.slice();
-      nextCards.splice(idx, 1);
-      return { ...h, cards: nextCards };
-    });
-  }
-
-  function declareWinner(name, cardValue) {
+  function declareWinner(name) {
     const legendary = currentAsset.value >= 10;
     setNetWorth((nw) => ({ ...nw, [name]: (nw[name] || 0) + currentAsset.value }));
     setLastResult({ winner: name, asset: currentAsset, unclaimed: false });
     setHistory((h) => [...h, { asset: currentAsset, winner: name, value: currentAsset.value }]);
-    setDealtHands((hands) => spendCard(hands, name, cardValue));
     (legendary ? sfx.legendaryWin : sfx.win)();
     setCelebrate({ legendary, id: Date.now() });
     logAssetEvent({
@@ -718,12 +698,10 @@ export default function App() {
       tieBreakRound: !!biddingPool,
       participants: Object.keys(bidders),
       winnerName: name,
-      winningCardValue: cardValue,
       unclaimed: false,
       decidedEarly: timeLeft > 0,
       secondsLeftAtClose: timeLeft,
     });
-    setPendingWinner(null);
     setBiddingPool(null);
     setScreen("asset-result");
   }
@@ -934,18 +912,6 @@ export default function App() {
             onDeclareWinner={pickWinner}
             onUnclaimed={declareUnclaimed}
             onTie={startTieSelect}
-          />
-        )}
-
-        {screen === "card-select" && pendingWinner && (
-          <CardSelectScreen
-            lang={lang}
-            winnerName={pendingWinner}
-            isTieBreak={!!biddingPool}
-            cardOptions={(dealtHands.find((h) => h.name === pendingWinner)?.cards || [])
-              .filter((v, i, arr) => arr.indexOf(v) === i)
-              .sort((a, b) => a - b)}
-            onSelect={(value) => declareWinner(pendingWinner, value)}
           />
         )}
 
@@ -1284,25 +1250,6 @@ function RevealScreen({ lang, asset, bidders, onDeclareWinner, onUnclaimed, onTi
           )}
         </>
       )}
-    </div>
-  );
-}
-
-function CardSelectScreen({ lang, winnerName, cardOptions, isTieBreak, onSelect }) {
-  const L = STR[lang];
-  return (
-    <div style={styles.panel}>
-      <div style={styles.eyebrow}>{L.revealEyebrow}</div>
-      <p style={styles.subtitle}>
-        {isTieBreak ? L.cardSelectDrawPrompt(winnerName) : L.cardSelectPrompt(winnerName)}
-      </p>
-      <div style={styles.playerBidGrid}>
-        {cardOptions.map((v) => (
-          <button key={v} onClick={() => onSelect(v)} style={styles.winnerPickBtn}>
-            <span style={{ ...styles.bidToggleName, fontSize: 22 }}>{v}</span>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
