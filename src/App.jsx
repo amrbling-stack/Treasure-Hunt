@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { Plus, X, Crown, Coins, Users, Play, ChevronRight, Trophy, Sparkles } from "lucide-react";
+import { Plus, X, Crown, Gem, Coins, Users, Play, ChevronRight, Trophy, Sparkles } from "lucide-react";
 import { saveGameSession, logAssetEvent, logHandDeal } from "./lib/supabase";
 
 // ---------- Design tokens ----------
@@ -966,24 +966,57 @@ function LangToggle({ lang, setLang }) {
 // without spoiling which specific treasure is coming next.
 function PacingHUD({ lang, totalRemaining, bands }) {
   const L = STR[lang];
-  const tiers = [
-    { key: "low", label: L.hudLowTier, icon: "\u{1F3FA}", color: "#8A93A8", count: bands.low },
-    { key: "mid", label: L.hudMidTier, icon: "\u{1F3FA}", color: "#2FA093", count: bands.mid },
-    { key: "legendary", label: L.hudLegendaryTier, icon: "\u{1F451}", color: "#A33E3E", count: bands.legendary },
-  ];
   return (
     <div style={styles.header}>
       <div style={styles.headerTitle}>
         <span style={styles.headerTitleText}>KANZ</span>
       </div>
       <div style={styles.pacingHud}>
-        {tiers.map((t) => (
-          <div key={t.key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ fontSize: 13 }}>{t.icon}</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: t.color }}>{t.count}</span>
-          </div>
-        ))}
-        <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 6, paddingLeft: 10, borderLeft: "1px solid #2A3348" }}>
+        <div
+          aria-label={L.hudLegendaryTier}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            background: "rgba(212,175,55,0.14)",
+            border: "1px solid #D4AF37",
+            borderRadius: 999,
+            padding: "3px 9px",
+            boxShadow: "0 0 6px rgba(212,175,55,0.35)",
+          }}
+        >
+          <Crown size={13} color="#F2CB6B" />
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#F2CB6B" }}>{bands.legendary}</span>
+        </div>
+        <div
+          aria-label={L.hudMidTier}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            background: "rgba(47,160,147,0.12)",
+            borderRadius: 999,
+            padding: "3px 9px",
+          }}
+        >
+          <Gem size={12} color="#2FA093" />
+          <span style={{ fontSize: 12, color: "#2FA093" }}>{bands.mid}</span>
+        </div>
+        <div
+          aria-label={L.hudLowTier}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            background: "rgba(138,147,168,0.10)",
+            borderRadius: 999,
+            padding: "3px 9px",
+          }}
+        >
+          <Coins size={12} color="#8A93A8" />
+          <span style={{ fontSize: 12, color: "#8A93A8" }}>{bands.low}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 2, paddingLeft: 10, borderLeft: "1px solid #2A3348" }}>
           <span style={{ fontSize: 11, color: "#8A93A8" }}>{L.hudTotalLeft}</span>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#F2CB6B" }}>{totalRemaining}</span>
         </div>
@@ -1470,11 +1503,11 @@ const styles = {
   pacingHud: {
     display: "flex",
     alignItems: "center",
-    gap: 10,
+    gap: 6,
     background: "rgba(13,18,32,0.6)",
     border: "1px solid #2A3348",
     borderRadius: 999,
-    padding: "5px 10px",
+    padding: "5px 8px",
   },
   panel: {
     background: "linear-gradient(180deg, #131B2E 0%, #0F1524 100%)",
