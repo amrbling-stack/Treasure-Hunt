@@ -387,17 +387,27 @@ function bandTokensFromPool(pool, band) {
 }
 
 // Spend one card from each named player's remaining hand. Called once per
-// auction round — normal or tie-break, both are hand-card bids. Which
-// specific face value gets removed doesn't matter for the count-based
-// "out of cards" gate; we just pop the lowest remaining card so a player's
-// own physical hand (highest cards saved for last, typically) roughly
-// tracks the on-screen count.
-function spendCardsForBidders(dealtHands, names) {
+// auction round — normal or tie-break, both are hand-card bids. For humans,
+// which specific face value gets removed doesn't matter for the count-based
+// "out of cards" gate (they hold the real physical card) — we just pop the
+// lowest remaining card so a player's own physical hand (highest cards
+// saved for last, typically) roughly tracks the on-screen count. AI
+// bidders don't have a physical hand, so their played value (already shown
+// at reveal via aiPlayedCards) has to be the exact card removed, or the
+// hand and the on-screen reveal would drift apart.
+function spendCardsForBidders(dealtHands, names, aiPlayedCards = {}) {
   if (!names.length) return dealtHands;
   const nameSet = new Set(names);
-  return dealtHands.map((h) =>
-    nameSet.has(h.name) && h.cards.length ? { ...h, cards: h.cards.slice(1) } : h
-  );
+  return dealtHands.map((h) => {
+    if (!nameSet.has(h.name) || !h.cards.length) return h;
+    if (h.name in aiPlayedCards) {
+      const played = aiPlayedCards[h.name];
+      const idx = h.cards.indexOf(played);
+      if (idx === -1) return { ...h, cards: h.cards.slice(1) }; // fallback, shouldn't happen
+      return { ...h, cards: [...h.cards.slice(0, idx), ...h.cards.slice(idx + 1)] };
+    }
+    return { ...h, cards: h.cards.slice(1) };
+  });
 }
 
 function shuffle(arr) {
@@ -619,6 +629,7 @@ export default function App() {
   const [seatArrangeIndex, setSeatArrangeIndex] = useState(0);
   const [tempSeatPick, setTempSeatPick] = useState(null);
   const [bidders, setBidders] = useState({}); // name -> true if bidding
+  const [aiPlayedCards, setAiPlayedCards] = useState({}); // name -> card value an AI bidder "played" this round (AI has no physical card to reveal, so the app has to show one)
   const [timeLeft, setTimeLeft] = useState(AUCTION_TIMER_SECONDS);
   const [timerActive, setTimerActive] = useState(false);
   const [lastResult, setLastResult] = useState(null);
@@ -790,6 +801,7 @@ export default function App() {
 
   function beginFirstAuction() {
     setBidders({});
+    setAiPlayedCards({});
     setBiddingPool(null);
     setTimeLeft(AUCTION_TIMER_SECONDS);
     setTimerActive(true);
@@ -818,7 +830,7 @@ export default function App() {
     // spends one card, win or lose. Tie-break is just another round restricted
     // to the tied players, not a separate deck (confirmed in actual play: a
     // mutual pass on a tie-break leaves the asset unclaimed, same as normal).
-    setDealtHands((dh) => spendCardsForBidders(dh, Object.keys(bidders)));
+    setDealtHands((dh) => spendCardsForBidders(dh, Object.keys(bidders), aiPlayedCards));
     sfx.reveal();
     setScreen("reveal");
   }
@@ -855,11 +867,20 @@ export default function App() {
     if (!pending.length) return;
 
     const timers = pending.map((name) => {
-      const remaining = dealtHands.find((h) => h.name === name)?.cards.length ?? 0;
+      const hand = dealtHands.find((h) => h.name === name)?.cards ?? [];
+      const remaining = hand.length;
       if (remaining === 0) return null;
       const delay = 400 + Math.random() * (AUCTION_TIMER_SECONDS * 1000 - 1200);
       return setTimeout(() => {
-        if (aiShouldBid(currentAsset, remaining)) toggleBid(name);
+        if (aiShouldBid(currentAsset, remaining)) {
+          // AI has no physical card to lay on the table at reveal, so it
+          // has to commit to (and later show) an actual value — plays its
+          // strongest remaining card, since hands stay sorted ascending as
+          // cards are removed from the top (see spendCardsForBidders).
+          const playedValue = hand[hand.length - 1];
+          setAiPlayedCards((prev) => ({ ...prev, [name]: playedValue }));
+          toggleBid(name);
+        }
       }, delay);
     });
     return () => timers.forEach((t) => t && clearTimeout(t));
@@ -968,6 +989,7 @@ export default function App() {
     sfx.tieBreak();
     setBiddingPool(tieSelected);
     setBidders({});
+    setAiPlayedCards({});
     setTimeLeft(AUCTION_TIMER_SECONDS);
     setTimerActive(true);
     setScreen("auction");
@@ -990,6 +1012,7 @@ export default function App() {
     setLegendaryValuePool(drawn.restLegendary);
     setAssetsSeen((n) => n + 1);
     setBidders({});
+    setAiPlayedCards({});
     setTimeLeft(AUCTION_TIMER_SECONDS);
     setTimerActive(true);
     setScreen("auction");
@@ -1149,6 +1172,8 @@ export default function App() {
             onDeclareWinner={pickWinner}
             onUnclaimed={declareUnclaimed}
             onTie={startTieSelect}
+            aiPlayerNames={aiPlayerNames}
+            aiPlayedCards={aiPlayedCards}
           />
         )}
 
@@ -1555,7 +1580,7 @@ function AuctionScreen({ lang, asset, assetsSeen, totalAssets, players, seatPosi
   );
 }
 
-function RevealScreen({ lang, asset, bidders, onDeclareWinner, onUnclaimed, onTie }) {
+function RevealScreen({ lang, asset, bidders, onDeclareWinner, onUnclaimed, onTie, aiPlayerNames = [], aiPlayedCards = {} }) {
   const L = STR[lang];
   const names = Object.keys(bidders);
   return (
@@ -1582,12 +1607,18 @@ function RevealScreen({ lang, asset, bidders, onDeclareWinner, onUnclaimed, onTi
       ) : (
         <>
           <div style={styles.playerBidGrid}>
-            {names.map((name) => (
-              <button key={name} onClick={() => onDeclareWinner(name)} style={styles.winnerPickBtn}>
-                <Crown size={18} color="#D4AF37" />
-                <span style={styles.bidToggleName}>{name}</span>
-              </button>
-            ))}
+            {names.map((name) => {
+              const isAI = aiPlayerNames.includes(name);
+              return (
+                <button key={name} onClick={() => onDeclareWinner(name)} style={styles.winnerPickBtn}>
+                  <Crown size={18} color="#D4AF37" />
+                  <span style={styles.bidToggleName}>{isAI ? `\u{1F916} ${name}` : name}</span>
+                  {isAI && name in aiPlayedCards && (
+                    <span style={styles.aiPlayedCardBadge}>{aiPlayedCards[name]}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           {names.length >= 2 && (
             <button style={styles.tieBtn} onClick={onTie}>
@@ -2131,6 +2162,18 @@ const styles = {
     borderRadius: 10,
     padding: "14px 16px",
     cursor: "pointer",
+  },
+  aiPlayedCardBadge: {
+    marginLeft: "auto",
+    fontFamily: "'Cinzel', serif",
+    fontWeight: 900,
+    fontSize: 16,
+    color: "#0A0E17",
+    background: "#F2CB6B",
+    borderRadius: 8,
+    minWidth: 28,
+    textAlign: "center",
+    padding: "2px 8px",
   },
   assetValueRow: { display: "flex", alignItems: "center", gap: 6 },
   assetValue: { fontFamily: "'Cinzel', serif", fontWeight: 900, fontSize: 30, color: "#F2CB6B" },
