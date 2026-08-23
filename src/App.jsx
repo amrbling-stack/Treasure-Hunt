@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Plus, X, Crown, Gem, Coins, Users, Play, ChevronRight, ChevronLeft, Trophy, Sparkles, HelpCircle, Bot } from "lucide-react";
-import { saveGameSession, logAssetEvent, logHandDeal } from "./lib/supabase";
+import { saveGameSession, logAssetEvent, logHandDeal, logAIDecisions } from "./lib/supabase";
 
 // ---------- Design tokens ----------
 // bg-deep #0A0E17, bg-panel #131B2E, gold #D4AF37, gold-bright #F2CB6B,
@@ -449,13 +449,74 @@ function buildAssetSubset(playerCount) {
   return picked;
 }
 
-// AI bidding heuristic. Bidding here is a binary in/out decision (not a
-// value choice — see spendCardsForBidders), so the bot just needs a
-// bid/pass call per asset: weigh the asset's value against the pool's
-// value ceiling, get pickier as its own hand thins out, and add a little
-// randomness so it doesn't play as a perfectly legible threshold every time.
-function aiShouldBid(asset, remainingCards) {
+// ---------- AI policy ----------
+// Bump this whenever the decision maths below changes, so old rows stay
+// interpretable instead of silently mixing with new behaviour in analysis.
+const AI_POLICY_VERSION = "v2";
+
+// Named policy variants. These exist so the logged data contains genuine
+// VARIATION rather than one fixed formula: a policy is assigned per AI seat
+// per match and written to every decision row, so win-rate can be compared
+// across variants with SQL. Passive logging of a single hard-coded heuristic
+// would only ever re-describe a function we already know analytically —
+// it can't tell us which behaviour is better. This turns the data into an
+// experiment instead of a mirror.
+const AI_POLICIES = {
+  // base       = threshold an asset's value score must clear to be worth a card
+  // scarce6/3  = extra pickiness as the hand runs low (6 or fewer / 3 or fewer)
+  // noise      = +/- randomness so the bot isn't a legible fixed cutoff
+  // catchUp    = threshold reduction when trailing the leader (0 = ignores standings)
+  // contest    = threshold change per rival still holding cards (>0 = shies away from crowds)
+  cautious:   { base: 0.56, scarce6: 0.08, scarce3: 0.20, noise: 0.14, catchUp: 0.00, contest: 0.03 },
+  balanced:   { base: 0.42, scarce6: 0.10, scarce3: 0.22, noise: 0.24, catchUp: 0.00, contest: 0.00 },
+  aggressive: { base: 0.30, scarce6: 0.05, scarce3: 0.14, noise: 0.20, catchUp: 0.00, contest: -0.02 },
+  adaptive:   { base: 0.46, scarce6: 0.10, scarce3: 0.20, noise: 0.16, catchUp: 0.16, contest: 0.02 },
+};
+const AI_POLICY_NAMES = Object.keys(AI_POLICIES);
+
+// Returns the full decision record, not just a boolean — every input that fed
+// the choice is kept so the row is self-contained for later analysis (and so a
+// future learned policy can be trained/evaluated on identical features).
+function aiDecide({
+  asset,
+  policyName,
+  remainingCards,
+  opponentsWithCards,
+  assetsRemaining,
+  legendaryRemaining,
+  netWorthSelf,
+  netWorthLeader,
+}) {
+  const p = AI_POLICIES[policyName] || AI_POLICIES.balanced;
   const valueScore = asset.value / MAX_CARD_VALUE; // 0..1, 13 = ceiling (Great Sphinx tier)
+  const scarcityPressure = remainingCards <= 3 ? p.scarce3 : remainingCards <= 6 ? p.scarce6 : 0;
+  const contestPressure = p.contest * opponentsWithCards;
+  // Trailing bots loosen up; how much is the variable under test.
+  const deficit = Math.max(0, (netWorthLeader || 0) - (netWorthSelf || 0));
+  const catchUpRelief = p.catchUp * Math.min(1, deficit / 20);
+  const noise = Math.random() * (p.noise * 2) - p.noise;
+  const threshold = p.base + scarcityPressure + contestPressure - catchUpRelief + noise;
+  return {
+    bid: valueScore >= threshold,
+    policyName,
+    policyVersion: AI_POLICY_VERSION,
+    valueScore: Number(valueScore.toFixed(4)),
+    threshold: Number(threshold.toFixed(4)),
+    scarcityPressure,
+    contestPressure: Number(contestPressure.toFixed(4)),
+    catchUpRelief: Number(catchUpRelief.toFixed(4)),
+    remainingCards,
+    opponentsWithCards,
+    assetsRemaining,
+    legendaryRemaining,
+    netWorthSelf: netWorthSelf || 0,
+    netWorthLeader: netWorthLeader || 0,
+  };
+}
+
+// Legacy shim kept so nothing else in the file depends on the old signature.
+function aiShouldBid(asset, remainingCards) {
+  const valueScore = asset.value / MAX_CARD_VALUE;
   const scarcityPressure = remainingCards <= 3 ? 0.22 : remainingCards <= 6 ? 0.1 : 0;
   const noise = Math.random() * 0.24 - 0.12;
   const threshold = 0.42 + scarcityPressure + noise;
@@ -630,6 +691,12 @@ export default function App() {
   const [tempSeatPick, setTempSeatPick] = useState(null);
   const [bidders, setBidders] = useState({}); // name -> true if bidding
   const [aiPlayedCards, setAiPlayedCards] = useState({}); // name -> card value an AI bidder "played" this round (AI has no physical card to reveal, so the app has to show one)
+  const [aiPolicies, setAiPolicies] = useState({}); // name -> policy variant assigned for this match (random per seat, so one match can compare variants head-to-head on the identical asset sequence)
+  // Buffers every AI decision made during the current round (bids AND passes).
+  // Flushed once the round resolves, so each row can carry its own outcome
+  // without a second write or an UPDATE. A pass is as informative as a bid for
+  // learning a policy, and passes are otherwise invisible in the data.
+  const aiRoundDecisionsRef = useRef([]);
   const [timeLeft, setTimeLeft] = useState(AUCTION_TIMER_SECONDS);
   const [timerActive, setTimerActive] = useState(false);
   const [lastResult, setLastResult] = useState(null);
@@ -774,14 +841,32 @@ export default function App() {
     const hands = buildFixedSuitHands(players.length);
     const dealtHandsList = players.map((name, i) => ({ name, cards: hands[i] }));
     setDealtHands(dealtHandsList);
+
+    // Randomise which policy each AI seat runs this match. Assigning per SEAT
+    // (not per match) means two bots in the same match face the identical
+    // asset sequence, which controls for deck luck when comparing variants.
+    const policyAssignment = {};
+    aiPlayerNames.forEach((n) => {
+      policyAssignment[n] = AI_POLICY_NAMES[Math.floor(Math.random() * AI_POLICY_NAMES.length)];
+    });
+    setAiPolicies(policyAssignment);
+
+    const assetSubset = buildAssetSubset(players.length);
     logHandDeal({
       matchId: matchIdRef.current,
       wave: 1,
       playerCount: players.length,
       hands: dealtHandsList,
+      aiPlayerNames,
+      aiPolicies: policyAssignment,
+      aiPolicyVersion: AI_POLICY_VERSION,
+      handSize: hands[0]?.length ?? 0,
+      totalAssets: assetSubset.length,
+      // The single most important balance ratio in the game: how many of the
+      // match's assets a player could theoretically bid on before running dry.
+      cardsPerAssetRatio: Number(((hands[0]?.length ?? 0) / (assetSubset.length || 1)).toFixed(3)),
     });
 
-    const assetSubset = buildAssetSubset(players.length);
     const pile = shuffle(assetSubset);
     const low = shuffle(bandTokensFromPool(assetSubset, "low"));
     const mid = shuffle(bandTokensFromPool(assetSubset, "mid"));
@@ -802,6 +887,7 @@ export default function App() {
   function beginFirstAuction() {
     setBidders({});
     setAiPlayedCards({});
+    aiRoundDecisionsRef.current = [];
     setBiddingPool(null);
     setTimeLeft(AUCTION_TIMER_SECONDS);
     setTimerActive(true);
@@ -866,13 +952,41 @@ export default function App() {
     const pending = pool.filter((p) => aiPlayerNames.includes(p) && !(p in bidders));
     if (!pending.length) return;
 
+    const leaderWorth = Math.max(0, ...players.map((n) => netWorth[n] || 0));
+
     const timers = pending.map((name) => {
       const hand = dealtHands.find((h) => h.name === name)?.cards ?? [];
       const remaining = hand.length;
       if (remaining === 0) return null;
       const delay = 400 + Math.random() * (AUCTION_TIMER_SECONDS * 1000 - 1200);
       return setTimeout(() => {
-        if (aiShouldBid(currentAsset, remaining)) {
+        const decision = aiDecide({
+          asset: currentAsset,
+          policyName: aiPolicies[name] || "balanced",
+          remainingCards: remaining,
+          opponentsWithCards: pool.filter(
+            (o) => o !== name && (dealtHands.find((h) => h.name === o)?.cards.length ?? 0) > 0
+          ).length,
+          assetsRemaining: assetDeck.length,
+          legendaryRemaining: legendaryValuePool.length,
+          netWorthSelf: netWorth[name] || 0,
+          netWorthLeader: leaderWorth,
+        });
+
+        // Buffer the decision whether it bid or passed — a policy can only be
+        // evaluated against the choices it declined as well as the ones it took.
+        aiRoundDecisionsRef.current.push({
+          aiName: name,
+          assetSeq: assetsSeen,
+          assetKey: currentAsset.key,
+          assetValue: currentAsset.value,
+          assetTier: currentAsset.tier,
+          tieBreakRound: !!biddingPool,
+          decisionMsIntoWindow: Math.round(delay),
+          ...decision,
+        });
+
+        if (decision.bid) {
           // AI has no physical card to lay on the table at reveal, so it
           // has to commit to (and later show) an actual value — plays its
           // strongest remaining card, since hands stay sorted ascending as
@@ -885,7 +999,7 @@ export default function App() {
     });
     return () => timers.forEach((t) => t && clearTimeout(t));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, timerActive, currentAsset, biddingPool, players, aiPlayerNames, bidders, dealtHands]);
+  }, [screen, timerActive, currentAsset, biddingPool, players, aiPlayerNames, bidders, dealtHands, aiPolicies, netWorth, assetDeck, legendaryValuePool, assetsSeen]);
 
   // end the bidding window early once every eligible player has placed a bid
   // (players who've already spent their whole hand can never bid, so they
@@ -899,6 +1013,66 @@ export default function App() {
       stopTimerAndReveal();
     }
   }, [bidders, timerActive, biddingPool, players.length, dealtHands]);
+
+  // Round-level snapshot shared by both resolution paths (won / unclaimed).
+  // Everything here is state that exists only during the round and is gone a
+  // moment later, so if it isn't captured now it can never be reconstructed.
+  function buildRoundContext() {
+    const bidderNames = Object.keys(bidders);
+    const eligible = (biddingPool || players).filter(
+      (p) => (dealtHands.find((h) => h.name === p)?.cards.length ?? 0) > 0
+    );
+    return {
+      participants: bidderNames,
+      aiParticipants: bidderNames.filter((n) => aiPlayerNames.includes(n)),
+      aiPlayedCards,
+      aiPolicies,
+      aiPolicyVersion: AI_POLICY_VERSION,
+      contested: bidderNames.length > 1,
+      bidderCount: bidderNames.length,
+      eligibleCount: eligible.length,
+      // Participation rate is the core balance signal: an asset nobody can or
+      // wants to bid on is dead weight in the pool.
+      participationRate: eligible.length ? Number((bidderNames.length / eligible.length).toFixed(3)) : null,
+      cardsRemaining: Object.fromEntries(dealtHands.map((h) => [h.name, h.cards.length])),
+      netWorthBefore: { ...netWorth },
+      assetsRemaining: assetDeck.length,
+      bandsRemaining: {
+        low: lowValuePool.length,
+        mid: midValuePool.length,
+        legendary: legendaryValuePool.length,
+      },
+    };
+  }
+
+  // Attach the round's outcome to each buffered AI decision and ship them.
+  // Doing it at resolution time means every row is self-contained: the inputs
+  // the bot saw AND what that choice actually earned it — which is exactly the
+  // shape needed to score one policy variant against another.
+  function flushAIDecisions({ winnerName, unclaimed, assetValue }) {
+    const rows = aiRoundDecisionsRef.current;
+    aiRoundDecisionsRef.current = [];
+    if (!rows.length) return;
+    logAIDecisions({
+      matchId: matchIdRef.current,
+      decisions: rows.map((d) => {
+        const won = !unclaimed && d.aiName === winnerName;
+        return {
+          ...d,
+          winnerName: unclaimed ? null : winnerName,
+          unclaimed,
+          wonAsset: won,
+          // Scoring the choice after the fact: bidding and losing burns a card
+          // for nothing; passing on something that went unclaimed was value
+          // left on the table. Both are cheap to compute now and expensive to
+          // reconstruct later.
+          valueGained: won ? assetValue : 0,
+          cardWasted: d.bid && !won,
+          missedFreeAsset: !d.bid && unclaimed,
+        };
+      }),
+    });
+  }
 
   function pickWinner(name) {
     sfx.uiClick();
@@ -918,12 +1092,14 @@ export default function App() {
       assetIndexInWave: assetsSeen,
       asset: currentAsset,
       tieBreakRound: !!biddingPool,
-      participants: Object.keys(bidders),
+      ...buildRoundContext(),
       winnerName: name,
+      winnerIsAI: aiPlayerNames.includes(name),
       unclaimed: false,
       decidedEarly: timeLeft > 0,
       secondsLeftAtClose: timeLeft,
     });
+    flushAIDecisions({ winnerName: name, unclaimed: false, assetValue: currentAsset.value });
     setBiddingPool(null);
     setScreen("asset-result");
   }
@@ -937,12 +1113,14 @@ export default function App() {
       assetIndexInWave: assetsSeen,
       asset: currentAsset,
       tieBreakRound: !!biddingPool,
-      participants: Object.keys(bidders),
+      ...buildRoundContext(),
       winnerName: null,
+      winnerIsAI: false,
       unclaimed: true,
       decidedEarly: timeLeft > 0,
       secondsLeftAtClose: timeLeft,
     });
+    flushAIDecisions({ winnerName: null, unclaimed: true, assetValue: currentAsset.value });
     setBiddingPool(null);
     setScreen("asset-result");
   }
@@ -990,6 +1168,7 @@ export default function App() {
     setBiddingPool(tieSelected);
     setBidders({});
     setAiPlayedCards({});
+    aiRoundDecisionsRef.current = [];
     setTimeLeft(AUCTION_TIMER_SECONDS);
     setTimerActive(true);
     setScreen("auction");
@@ -1013,6 +1192,7 @@ export default function App() {
     setAssetsSeen((n) => n + 1);
     setBidders({});
     setAiPlayedCards({});
+    aiRoundDecisionsRef.current = [];
     setTimeLeft(AUCTION_TIMER_SECONDS);
     setTimerActive(true);
     setScreen("auction");
@@ -1053,8 +1233,22 @@ export default function App() {
       saveGameSession({
         matchId: matchIdRef.current,
         players,
+        aiPlayerNames,
+        aiPolicies,
+        aiPolicyVersion: AI_POLICY_VERSION,
         netWorth,
         ranked,
+        winner: ranked[0] || null,
+        winnerIsAI: aiPlayerNames.includes(ranked[0]),
+        // Margin separates "the mechanics produced a real contest" from
+        // "someone ran away with it" — the headline health metric for balance.
+        winMargin: ranked.length > 1 ? (netWorth[ranked[0]] || 0) - (netWorth[ranked[1]] || 0) : null,
+        // Cards left unspent at the buzzer. Consistently high means the match
+        // is too short for the hand size (hoarding never gets punished);
+        // consistently zero means players ran dry and the endgame was forced.
+        cardsUnspent: Object.fromEntries(dealtHands.map((h) => [h.name, h.cards.length])),
+        assetsUnclaimed: history.filter((h) => !h.winner).length,
+        totalAssets: totalAssetsAtStart,
         totalWaves: 1, // no waves anymore — kept for schema compatibility
         lang,
         durationSeconds: matchStartRef.current
