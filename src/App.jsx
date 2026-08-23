@@ -382,6 +382,17 @@ const VALUE_BAND_FOR_TIER = {
   legendary: "legendary",
 };
 
+// Visual identity for each of the three HUD bands (not the five asset
+// tiers — see VALUE_BAND_FOR_TIER above). Used by both the pacing HUD pills
+// and the in-auction tier badge, so a player can match "the badge on this
+// card" to "the counter that just went down" at a glance — same icon, same
+// color, same label, one source of truth.
+const BAND_META = {
+  legendary: { Icon: Crown, color: "#F2CB6B", bg: "rgba(212,175,55,0.14)", border: "#D4AF37", boxShadow: "0 0 6px rgba(212,175,55,0.35)", iconSize: 13, fontWeight: 700, labelKey: "hudLegendaryTier" },
+  mid: { Icon: Gem, color: "#2FA093", bg: "rgba(47,160,147,0.12)", iconSize: 12, fontWeight: 400, labelKey: "hudMidTier" },
+  low: { Icon: Coins, color: "#8A93A8", bg: "rgba(138,147,168,0.10)", iconSize: 12, fontWeight: 400, labelKey: "hudLowTier" },
+};
+
 function bandTokensFromPool(pool, band) {
   return pool.filter((a) => VALUE_BAND_FOR_TIER[a.tier] === band).map((a) => a.value);
 }
@@ -1294,7 +1305,7 @@ export default function App() {
       <div style={styles.vignette} />
 
       <div style={styles.stage}>
-        {screen !== "setup" && screen !== "seat-arrange" && (
+        {screen !== "setup" && screen !== "seat-arrange" && screen !== "auction" && (
           <PacingHUD lang={lang} totalRemaining={assetsRemainingAfterCurrent} bands={bandsRemaining} />
         )}
 
@@ -1355,6 +1366,8 @@ export default function App() {
             onTimeUp={stopTimerAndReveal}
             remainingCounts={Object.fromEntries(dealtHands.map((h) => [h.name, h.cards.length]))}
             aiPlayerNames={aiPlayerNames}
+            hudTotalRemaining={assetsRemainingAfterCurrent}
+            hudBands={bandsRemaining}
           />
         )}
 
@@ -1458,63 +1471,57 @@ function HowToPlayModal({ lang, slide, onNext, onBack, onClose }) {
 // Always-on pacing HUD: three tier bands (low/mid/legendary) still waiting in
 // the pool, plus a headline total. Lets players pace their card-spending
 // without spoiling which specific treasure is coming next.
-function PacingHUD({ lang, totalRemaining, bands }) {
+//
+// variant="header" (default): sits in the top bar next to the KANZ title,
+// used on reveal/asset-result/tie-select/final where there's no seat dock to
+// collide with.
+// variant="panel": same pill row, but meant to be embedded inline inside the
+// auction panel itself (below the timer ring, above the asset card) instead
+// of floating at the top of the screen — see AuctionScreen. This is what
+// keeps it clear of the top seat, which always sits at the screen's top
+// edge: the HUD simply isn't up there anymore, it's inside the card.
+function PacingHUD({ lang, totalRemaining, bands, variant = "header" }) {
   const L = STR[lang];
+  const pillRow = (
+    <div style={variant === "panel" ? styles.pacingHudPanel : styles.pacingHud}>
+      {["legendary", "mid", "low"].map((band) => {
+        const meta = BAND_META[band];
+        const { Icon } = meta;
+        return (
+          <div
+            key={band}
+            aria-label={L[meta.labelKey]}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              background: meta.bg,
+              border: meta.border ? `1px solid ${meta.border}` : "none",
+              borderRadius: 999,
+              padding: "3px 9px",
+              boxShadow: meta.boxShadow || "none",
+            }}
+          >
+            <Icon size={meta.iconSize} color={meta.color} />
+            <span style={{ fontSize: 12, fontWeight: meta.fontWeight, color: meta.color }}>{bands[band]}</span>
+          </div>
+        );
+      })}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 2, paddingLeft: 10, borderLeft: "1px solid #2A3348" }}>
+        <span style={{ fontSize: 11, color: "#8A93A8" }}>{L.hudTotalLeft}</span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: "#F2CB6B" }}>{totalRemaining}</span>
+      </div>
+    </div>
+  );
+
+  if (variant === "panel") return pillRow;
+
   return (
     <div style={styles.header}>
       <div style={styles.headerTitle}>
         <span style={styles.headerTitleText}>KANZ</span>
       </div>
-      <div style={styles.pacingHud}>
-        <div
-          aria-label={L.hudLegendaryTier}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            background: "rgba(212,175,55,0.14)",
-            border: "1px solid #D4AF37",
-            borderRadius: 999,
-            padding: "3px 9px",
-            boxShadow: "0 0 6px rgba(212,175,55,0.35)",
-          }}
-        >
-          <Crown size={13} color="#F2CB6B" />
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#F2CB6B" }}>{bands.legendary}</span>
-        </div>
-        <div
-          aria-label={L.hudMidTier}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            background: "rgba(47,160,147,0.12)",
-            borderRadius: 999,
-            padding: "3px 9px",
-          }}
-        >
-          <Gem size={12} color="#2FA093" />
-          <span style={{ fontSize: 12, color: "#2FA093" }}>{bands.mid}</span>
-        </div>
-        <div
-          aria-label={L.hudLowTier}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            background: "rgba(138,147,168,0.10)",
-            borderRadius: 999,
-            padding: "3px 9px",
-          }}
-        >
-          <Coins size={12} color="#8A93A8" />
-          <span style={{ fontSize: 12, color: "#8A93A8" }}>{bands.low}</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 2, paddingLeft: 10, borderLeft: "1px solid #2A3348" }}>
-          <span style={{ fontSize: 11, color: "#8A93A8" }}>{L.hudTotalLeft}</span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#F2CB6B" }}>{totalRemaining}</span>
-        </div>
-      </div>
+      {pillRow}
     </div>
   );
 }
@@ -1652,7 +1659,7 @@ function SeatArrangeScreen({ lang, playerName, index, total, tempPick, taken, cl
   );
 }
 
-function AuctionScreen({ lang, asset, assetsSeen, totalAssets, players, seatPositions, tieRound, bidders, toggleBid, timeLeft, remainingCounts, aiPlayerNames = [] }) {
+function AuctionScreen({ lang, asset, assetsSeen, totalAssets, players, seatPositions, tieRound, bidders, toggleBid, timeLeft, remainingCounts, aiPlayerNames = [], hudTotalRemaining, hudBands }) {
   const L = STR[lang];
   const pct = timeLeft / AUCTION_TIMER_SECONDS;
   const urgent = timeLeft <= 3;
@@ -1674,9 +1681,40 @@ function AuctionScreen({ lang, asset, assetsSeen, totalAssets, players, seatPosi
           <span style={{ ...styles.timerNum, color: urgent ? "#E86A6A" : "#F2CB6B" }}>{timeLeft}</span>
         </div>
 
+        {/* Pacing HUD lives here — inside the panel, below the timer ring —
+            instead of floating at the top of the screen. The top seat in the
+            bid dock always sits at the screen's top edge, so moving the HUD
+            down here is what actually clears that space, not just visually
+            separating them. */}
+        {hudBands && (
+          <PacingHUD lang={lang} totalRemaining={hudTotalRemaining} bands={hudBands} variant="panel" />
+        )}
+
         <div style={{ ...styles.assetCard, boxShadow: "0 0 60px rgba(212,175,55,0.25)", borderColor: "#D4AF37" }}>
           <div style={styles.assetValueRow}>
             <span style={styles.assetValue}>{asset.value}</span>
+            {(() => {
+              const meta = BAND_META[VALUE_BAND_FOR_TIER[asset.tier]];
+              if (!meta) return null;
+              const { Icon } = meta;
+              return (
+                <span
+                  aria-label={L[meta.labelKey]}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    background: meta.bg,
+                    border: meta.border ? `1px solid ${meta.border}` : "1px solid transparent",
+                    borderRadius: 999,
+                    padding: "3px 9px",
+                  }}
+                >
+                  <Icon size={13} color={meta.color} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: meta.color }}>{L[meta.labelKey]}</span>
+                </span>
+              );
+            })()}
           </div>
           {ASSET_IMAGES[asset.key] && (() => {
             const ratio = ASSET_IMAGE_RATIO[asset.key] || 0.75;
@@ -2031,6 +2069,17 @@ const styles = {
     border: "1px solid #2A3348",
     borderRadius: 999,
     padding: "5px 8px",
+  },
+  // Same pill row as `pacingHud`, but sized/placed to sit inline inside the
+  // auction panel (below the timer ring) instead of floating in the top
+  // header — see PacingHUD's variant="panel".
+  pacingHudPanel: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    margin: "2px 0 6px",
   },
   panel: {
     background: "linear-gradient(180deg, #131B2E 0%, #0F1524 100%)",
@@ -2413,7 +2462,13 @@ const styles = {
     marginTop: 2,
   },
   bidDock: {
-    position: "fixed",
+    // Was "fixed" (viewport-relative), so seat percentages were computed
+    // against the full window width/height instead of the 460px stage —
+    // on screens wider than ~460px, left/right seats landed off the panel
+    // entirely. "absolute" scopes this to the nearest positioned ancestor,
+    // which is `stage` (already position:"relative"), so 0-100% now maps
+    // to the actual game column on every screen size.
+    position: "absolute",
     inset: 0,
     zIndex: 40,
     pointerEvents: "none",
