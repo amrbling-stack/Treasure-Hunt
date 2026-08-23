@@ -21,23 +21,50 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 export async function saveGameSession({
   matchId,
   players,
+  aiPlayerNames = [],
+  aiPolicies = {},
+  aiPolicyVersion = null,
   netWorth,
   ranked,
   totalWaves,
   lang,
   memoryFinalWave,
   durationSeconds,
+  winMargin,
+  cardsUnspent,
+  assetsUnclaimed,
+  totalAssets,
 }) {
   try {
     await supabase.from("game_sessions").insert({
       match_id: matchId,
       player_count: players.length,
-      players: players.map((name) => ({ name, score: netWorth[name] || 0 })),
+      players: players.map((name) => ({
+        name,
+        score: netWorth[name] || 0,
+        is_ai: aiPlayerNames.includes(name),
+      })),
       winner_name: ranked[0] ?? null,
       wave_count: totalWaves,
       language: lang,
       memory_challenge: memoryFinalWave,
       duration_seconds: durationSeconds ?? null,
+
+      // --- AI context ---
+      // Matches containing bots must be separable from all-human matches,
+      // otherwise bot behaviour silently contaminates human balance stats.
+      ai_player_names: aiPlayerNames,
+      ai_policies: aiPolicies,
+      ai_policy_version: aiPolicyVersion,
+      ai_count: aiPlayerNames.length,
+      human_count: players.length - aiPlayerNames.length,
+      winner_is_ai: aiPlayerNames.includes(ranked[0]),
+
+      // --- balance metrics ---
+      win_margin: winMargin ?? null,
+      cards_unspent: cardsUnspent ?? null,
+      assets_unclaimed: assetsUnclaimed ?? null,
+      total_assets: totalAssets ?? null,
     });
   } catch (err) {
     console.error("saveGameSession failed:", err);
@@ -59,6 +86,11 @@ export async function logHandDeal({
   overlapScore,
   fallbackUsed,
   hands, // array of { name, cards } in seat order
+  aiPlayerNames = [],
+  aiPolicies = {},
+  aiPolicyVersion = null,
+  totalAssets,
+  cardsPerAssetRatio,
 }) {
   try {
     const rows = hands.map((h, seatIndex) => ({
@@ -74,6 +106,18 @@ export async function logHandDeal({
       forced_clash_wave: !!forcedClashWave,
       overlap_score: overlapScore ?? null,
       fallback_used: !!fallbackUsed,
+
+      // Per-seat AI tagging: lets seat-fairness queries exclude bot seats,
+      // and lets policy performance be traced back to a specific seat.
+      is_ai: aiPlayerNames.includes(h.name),
+      ai_policy: aiPolicies[h.name] ?? null,
+      ai_policy_version: aiPolicyVersion,
+
+      // The core balance ratio: how much of the match a full hand can cover.
+      // Fixed 13-card hands against a pool that scales with player count means
+      // this swings from ~0.93 at 2 players to ~0.46 at 4.
+      total_assets: totalAssets ?? null,
+      cards_per_asset_ratio: cardsPerAssetRatio ?? null,
     }));
     await supabase.from("hand_deals").insert(rows);
   } catch (err) {
@@ -100,6 +144,20 @@ export async function logAssetEvent({
   unclaimed,
   decidedEarly,
   secondsLeftAtClose,
+  // --- AI + balance context ---
+  aiParticipants = [],
+  aiPlayedCards = {},
+  aiPolicies = {},
+  aiPolicyVersion = null,
+  winnerIsAI,
+  contested,
+  bidderCount,
+  eligibleCount,
+  participationRate,
+  cardsRemaining,
+  netWorthBefore,
+  assetsRemaining,
+  bandsRemaining,
 }) {
   try {
     await supabase.from("asset_events").insert({
@@ -120,9 +178,92 @@ export async function logAssetEvent({
       unclaimed: !!unclaimed,
       decided_early: !!decidedEarly,
       seconds_left_at_close: secondsLeftAtClose ?? null,
+
+      // --- AI context ---
+      // aiPlayedCards is the only record of what a bot actually bid; humans
+      // hold physical cards the app never sees, so bot rows are the only ones
+      // with a known bid value.
+      ai_participants: aiParticipants,
+      ai_played_cards: aiPlayedCards,
+      ai_policies: aiPolicies,
+      ai_policy_version: aiPolicyVersion,
+      winner_is_ai: !!winnerIsAI,
+
+      // --- balance context ---
+      // participation_rate is bidders over players who still HAD a card to
+      // spend, which is the honest denominator: someone out of cards didn't
+      // decline the asset, they simply couldn't compete for it.
+      contested: !!contested,
+      bidder_count: bidderCount ?? participants.length,
+      eligible_count: eligibleCount ?? null,
+      participation_rate: participationRate ?? null,
+      cards_remaining: cardsRemaining ?? null,
+      net_worth_before: netWorthBefore ?? null,
+      assets_remaining: assetsRemaining ?? null,
+      bands_remaining: bandsRemaining ?? null,
     });
   } catch (err) {
     console.error("logAssetEvent failed:", err);
   }
 }
 
+/**
+ * Fire-and-forget batch log of every AI decision in one resolved round —
+ * passes as well as bids.
+ *
+ * Passes matter as much as bids: a policy can only be judged against the
+ * chances it declined, not just the ones it took. Each row carries the
+ * features the bot saw, the policy variant it was running, and the outcome
+ * of the round, so it is self-contained for later scoring or training.
+ * Written once at round resolution so the outcome is already known and no
+ * follow-up UPDATE is needed.
+ * Never throws — a failed log should never break the game UI.
+ */
+export async function logAIDecisions({ matchId, decisions }) {
+  if (!decisions?.length) return;
+  try {
+    const rows = decisions.map((d) => ({
+      match_id: matchId,
+
+      // what was on the table
+      asset_seq: d.assetSeq,
+      asset_key: d.assetKey,
+      asset_value: d.assetValue,
+      asset_tier: d.assetTier,
+      tie_break_round: !!d.tieBreakRound,
+
+      // who decided, under which policy
+      ai_name: d.aiName,
+      policy_name: d.policyName,
+      policy_version: d.policyVersion,
+
+      // the decision and the maths behind it
+      bid: !!d.bid,
+      value_score: d.valueScore,
+      threshold: d.threshold,
+      scarcity_pressure: d.scarcityPressure,
+      contest_pressure: d.contestPressure,
+      catch_up_relief: d.catchUpRelief,
+      decision_ms: d.decisionMsIntoWindow,
+
+      // board state at the moment of choosing
+      remaining_cards: d.remainingCards,
+      opponents_with_cards: d.opponentsWithCards,
+      assets_remaining: d.assetsRemaining,
+      legendary_remaining: d.legendaryRemaining,
+      net_worth_self: d.netWorthSelf,
+      net_worth_leader: d.netWorthLeader,
+
+      // outcome
+      winner_name: d.winnerName ?? null,
+      unclaimed: !!d.unclaimed,
+      won_asset: !!d.wonAsset,
+      value_gained: d.valueGained ?? 0,
+      card_wasted: !!d.cardWasted,
+      missed_free_asset: !!d.missedFreeAsset,
+    }));
+    await supabase.from("ai_decisions").insert(rows);
+  } catch (err) {
+    console.error("logAIDecisions failed:", err);
+  }
+}

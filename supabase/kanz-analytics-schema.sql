@@ -1,6 +1,12 @@
 -- Kanz analytics schema additions
 -- Run in the Supabase SQL editor for project tghuwknvudejhreyfutf
 -- Safe to re-run: every statement is IF NOT EXISTS.
+--
+-- Table names match what src/lib/supabase.js actually writes to:
+--   game_sessions  (one row per match)
+--   hand_deals     (one row per player per deal)
+--   asset_events   (one row per asset resolution)
+--   ai_decisions   (one row per AI decision -- new, created below)
 
 -- ---------------------------------------------------------------
 -- 1. New table: one row per AI decision point (bids AND passes)
@@ -55,30 +61,50 @@ create index if not exists ai_decisions_match_idx  on ai_decisions (match_id);
 create index if not exists ai_decisions_policy_idx on ai_decisions (policy_name, policy_version);
 create index if not exists ai_decisions_tier_idx   on ai_decisions (asset_tier);
 
+-- Anon-key inserts: the app writes client-side, so an insert policy is
+-- required or every write silently fails under RLS.
+alter table ai_decisions enable row level security;
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where tablename = 'ai_decisions' and policyname = 'anon_insert_ai_decisions'
+  ) then
+    create policy anon_insert_ai_decisions
+      on ai_decisions for insert to anon with check (true);
+  end if;
+end $$;
+
 -- ---------------------------------------------------------------
 -- 2. Added columns on existing tables
 -- ---------------------------------------------------------------
--- If these columns already exist as jsonb catch-alls, skip this block.
-alter table asset_events add column if not exists ai_participants   jsonb;
-alter table asset_events add column if not exists ai_played_cards   jsonb;
-alter table asset_events add column if not exists ai_policies       jsonb;
-alter table asset_events add column if not exists ai_policy_version text;
-alter table asset_events add column if not exists winner_is_ai      boolean;
-alter table asset_events add column if not exists contested         boolean;
-alter table asset_events add column if not exists bidder_count      int;
-alter table asset_events add column if not exists eligible_count    int;
+alter table asset_events add column if not exists ai_participants    jsonb;
+alter table asset_events add column if not exists ai_played_cards    jsonb;
+alter table asset_events add column if not exists ai_policies        jsonb;
+alter table asset_events add column if not exists ai_policy_version  text;
+alter table asset_events add column if not exists winner_is_ai       boolean;
+alter table asset_events add column if not exists contested          boolean;
+alter table asset_events add column if not exists bidder_count       int;
+alter table asset_events add column if not exists eligible_count     int;
 alter table asset_events add column if not exists participation_rate numeric;
-alter table asset_events add column if not exists cards_remaining   jsonb;
-alter table asset_events add column if not exists net_worth_before  jsonb;
-alter table asset_events add column if not exists assets_remaining  int;
-alter table asset_events add column if not exists bands_remaining   jsonb;
+alter table asset_events add column if not exists cards_remaining    jsonb;
+alter table asset_events add column if not exists net_worth_before   jsonb;
+alter table asset_events add column if not exists assets_remaining   int;
+alter table asset_events add column if not exists bands_remaining    jsonb;
 
 alter table game_sessions add column if not exists ai_player_names    jsonb;
 alter table game_sessions add column if not exists ai_policies        jsonb;
 alter table game_sessions add column if not exists ai_policy_version  text;
-alter table game_sessions add column if not exists winner             text;
+alter table game_sessions add column if not exists ai_count           int;
+alter table game_sessions add column if not exists human_count        int;
 alter table game_sessions add column if not exists winner_is_ai       boolean;
 alter table game_sessions add column if not exists win_margin         int;
 alter table game_sessions add column if not exists cards_unspent      jsonb;
 alter table game_sessions add column if not exists assets_unclaimed   int;
 alter table game_sessions add column if not exists total_assets       int;
+
+alter table hand_deals add column if not exists is_ai                 boolean;
+alter table hand_deals add column if not exists ai_policy             text;
+alter table hand_deals add column if not exists ai_policy_version     text;
+alter table hand_deals add column if not exists total_assets          int;
+alter table hand_deals add column if not exists cards_per_asset_ratio numeric;
