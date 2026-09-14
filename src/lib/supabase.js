@@ -1,5 +1,17 @@
 import { createClient } from "@supabase/supabase-js";
 
+// supabase-js does NOT throw when an insert is rejected — it resolves with an
+// { error } object. A try/catch alone therefore reports nothing when, say, the
+// target table doesn't exist, which is exactly how a month of writes was lost
+// without a single console message. Every write goes through this check.
+function reportIfFailed(label, result) {
+  if (result && result.error) {
+    console.error(`[kanz analytics] ${label} rejected:`, result.error.message || result.error);
+    return false;
+  }
+  return true;
+}
+
 // Dedicated Supabase project for Kanz match/analytics data (project: "kanz").
 // Anon keys are safe to ship client-side by design — Row Level Security on
 // each table is what actually protects data, not key secrecy.
@@ -36,7 +48,7 @@ export async function saveGameSession({
   totalAssets,
 }) {
   try {
-    await supabase.from("game_sessions").insert({
+    reportIfFailed("saveGameSession", await supabase.from("game_sessions").insert({
       match_id: matchId,
       player_count: players.length,
       players: players.map((name) => ({
@@ -65,7 +77,7 @@ export async function saveGameSession({
       cards_unspent: cardsUnspent ?? null,
       assets_unclaimed: assetsUnclaimed ?? null,
       total_assets: totalAssets ?? null,
-    });
+    }));
   } catch (err) {
     console.error("saveGameSession failed:", err);
   }
@@ -114,12 +126,12 @@ export async function logHandDeal({
       ai_policy_version: aiPolicyVersion,
 
       // The core balance ratio: how much of the match a full hand can cover.
-      // Fixed 13-card hands against a pool that scales with player count means
-      // this swings from ~0.93 at 2 players to ~0.46 at 4.
+      // Fixed 13-card hands against a fixed 16-asset match pool put this at
+      // ~0.81 at every player count.
       total_assets: totalAssets ?? null,
       cards_per_asset_ratio: cardsPerAssetRatio ?? null,
     }));
-    await supabase.from("hand_deals").insert(rows);
+    reportIfFailed("logHandDeal", await supabase.from("hand_deals").insert(rows));
   } catch (err) {
     console.error("logHandDeal failed:", err);
   }
@@ -160,7 +172,7 @@ export async function logAssetEvent({
   bandsRemaining,
 }) {
   try {
-    await supabase.from("asset_events").insert({
+    reportIfFailed("logAssetEvent", await supabase.from("asset_events").insert({
       match_id: matchId,
       wave,
       asset_index_in_wave: assetIndexInWave,
@@ -168,7 +180,7 @@ export async function logAssetEvent({
       asset_name: asset.name,
       asset_value: asset.value,
       asset_tier: asset.tier,
-      legendary: asset.value >= 10,
+      legendary: asset.tier === "legendary",
       forced_clash_wave: !!forcedClashWave,
       tie_break_round: !!tieBreakRound,
       participant_count: participants.length,
@@ -201,7 +213,7 @@ export async function logAssetEvent({
       net_worth_before: netWorthBefore ?? null,
       assets_remaining: assetsRemaining ?? null,
       bands_remaining: bandsRemaining ?? null,
-    });
+    }));
   } catch (err) {
     console.error("logAssetEvent failed:", err);
   }
@@ -262,7 +274,7 @@ export async function logAIDecisions({ matchId, decisions }) {
       card_wasted: !!d.cardWasted,
       missed_free_asset: !!d.missedFreeAsset,
     }));
-    await supabase.from("ai_decisions").insert(rows);
+    reportIfFailed("logAIDecisions", await supabase.from("ai_decisions").insert(rows));
   } catch (err) {
     console.error("logAIDecisions failed:", err);
   }
