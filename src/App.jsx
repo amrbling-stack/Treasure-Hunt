@@ -189,8 +189,6 @@ const STR = {
     hudLegendaryTier: "Legendary",
     hudTotalLeft: "left",
 
-    introMemorizeEyebrow: "MEMORIZE \u2014 FINAL WAVE",
-    introPreviewEyebrow: (w, tw) => `WAVE ${w} OF ${tw} \u00b7 PREVIEW`,
     introTitle: "This Round's Treasures",
     introMemorizeUnit: "to memorize \u2014 bidding starts automatically",
     introSubtitle: (n, total) => `${n} items, worth ${total} total.`,
@@ -215,7 +213,7 @@ const STR = {
 
     tieSelectEyebrow: "TIE-BREAKER",
     tieSelectTitle: "Who Tied?",
-    tieSelectSubtitle: "Tap everyone who played the same highest card. They'll each draw one card from the deck to settle it.",
+    tieSelectSubtitle: "Tap everyone who played the same highest card. They'll each bid another card from their hand — or pass — to settle it.",
     tied: "TIED \u2713",
     tapToSelect: "TAP TO SELECT",
     selectAtLeast2: "Select at Least 2",
@@ -290,8 +288,6 @@ const STR = {
     hudLegendaryTier: "\u0623\u0633\u0637\u0648\u0631\u064a",
     hudTotalLeft: "\u0645\u062a\u0628\u0642\u064a",
 
-    introMemorizeEyebrow: "\u0627\u062d\u0641\u0638 \u2014 \u0627\u0644\u062c\u0648\u0644\u0629 \u0627\u0644\u0623\u062e\u064a\u0631\u0629",
-    introPreviewEyebrow: (w, tw) => `\u0627\u0644\u062c\u0648\u0644\u0629 ${w} \u0645\u0646 ${tw} \u00b7 \u0645\u0639\u0627\u064a\u0646\u0629`,
     introTitle: "\u0643\u0646\u0648\u0632 \u0647\u0630\u0647 \u0627\u0644\u062c\u0648\u0644\u0629",
     introMemorizeUnit: "\u0644\u0644\u062d\u0641\u0638 \u2014 \u064a\u0628\u062f\u0623 \u0627\u0644\u0645\u0632\u0627\u062f \u062a\u0644\u0642\u0627\u0626\u064a\u0627\u064b",
     introSubtitle: (n, total) => `${n} \u0642\u0637\u0639\u060c \u0628\u0642\u064a\u0645\u0629 \u0625\u062c\u0645\u0627\u0644\u064a\u0629 ${total}.`,
@@ -316,7 +312,7 @@ const STR = {
 
     tieSelectEyebrow: "\u0643\u0633\u0631 \u0627\u0644\u062a\u0639\u0627\u062f\u0644",
     tieSelectTitle: "\u0645\u0646 \u062a\u0639\u0627\u062f\u0644\u061f",
-    tieSelectSubtitle: "\u0627\u0636\u063a\u0637 \u0639\u0644\u0649 \u0643\u0644 \u0645\u0646 \u0644\u0639\u0628 \u0646\u0641\u0633 \u0627\u0644\u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0623\u0639\u0644\u0649. \u0633\u064a\u0633\u062d\u0628 \u0643\u0644 \u0645\u0646\u0647\u0645 \u0628\u0637\u0627\u0642\u0629 \u0645\u0646 \u0627\u0644\u0623\u0648\u0631\u0627\u0642 \u0644\u062d\u0633\u0645 \u0627\u0644\u0623\u0645\u0631.",
+    tieSelectSubtitle: "\u0627\u0636\u063a\u0637 \u0639\u0644\u0649 \u0643\u0644 \u0645\u0646 \u0644\u0639\u0628 \u0646\u0641\u0633 \u0627\u0644\u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0623\u0639\u0644\u0649. \u0633\u064a\u0644\u0639\u0628 \u0643\u0644 \u0645\u0646\u0647\u0645 \u0628\u0637\u0627\u0642\u0629 \u0623\u062e\u0631\u0649 \u0645\u0646 \u064a\u062f\u0647 \u2014 \u0623\u0648 \u064a\u0645\u0631\u0631 \u2014 \u0644\u062d\u0633\u0645 \u0627\u0644\u0623\u0645\u0631.",
     tied: "\u0645\u062a\u0639\u0627\u062f\u0644 \u2713",
     tapToSelect: "\u0627\u0636\u063a\u0637 \u0644\u0644\u0627\u062e\u062a\u064a\u0627\u0631",
     selectAtLeast2: "\u0627\u062e\u062a\u0631 \u0627\u062b\u0646\u064a\u0646 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644",
@@ -393,8 +389,12 @@ const BAND_META = {
   low: { Icon: Coins, color: "#8A93A8", bg: "rgba(138,147,168,0.10)", iconSize: 12, fontWeight: 400, labelKey: "hudLowTier" },
 };
 
-function bandTokensFromPool(pool, band) {
-  return pool.filter((a) => VALUE_BAND_FOR_TIER[a.tier] === band).map((a) => a.value);
+// How many assets of each band are still undrawn. Derived straight from the
+// remaining deck, so it can never disagree with what's actually left.
+function bandCounts(deck) {
+  const out = { low: 0, mid: 0, legendary: 0 };
+  deck.forEach((a) => { out[VALUE_BAND_FOR_TIER[a.tier]]++; });
+  return out;
 }
 
 // Spend one card from each named player's remaining hand. Called once per
@@ -430,15 +430,24 @@ function shuffle(arr) {
   return a;
 }
 
-// How many assets a match draws from, gated by table size instead of always
-// running the full 28. Keeps every band's proportion (low/mid/legendary)
-// intact via largest-remainder rounding, so a 2-player match still has real
-// legendary-tier stakes — just fewer of everything, not a truncated pool.
-const ASSETS_PER_PLAYER = 7;
+// Fixed match size, identical at every table size: 16 assets carrying the
+// DISTINCT values 1-16, one of each. Distinct values are the point — a player
+// can count exactly which prizes have gone and which are still buried, which
+// a repeating tier-banded pool made impossible. Band proportions are still
+// preserved via largest-remainder rounding so the pacing HUD stays honest.
+const ASSETS_IN_MATCH = 16;
+
+// Asset values now run 1..16 while bid cards run 1..13. These are different
+// scales and must not be conflated: a card is what you SPEND, an asset value
+// is what you SCORE. Any normalisation of an asset's worth uses this ceiling.
+const MAX_ASSET_VALUE = ASSETS_IN_MATCH;
+
+// Lowest tier gets the lowest distinct values, legendary the highest, so tier
+// still reliably predicts worth even though every value appears exactly once.
+const TIER_RANK = { trinket: 0, common: 1, mid: 2, high: 3, legendary: 4 };
 
 function buildAssetSubset(playerCount) {
-  const total = Math.min(ASSET_POOL.length, ASSETS_PER_PLAYER * playerCount);
-  if (total >= ASSET_POOL.length) return ASSET_POOL.slice();
+  const total = Math.min(ASSET_POOL.length, ASSETS_IN_MATCH);
 
   const bands = ["low", "mid", "legendary"];
   const byBand = { low: [], mid: [], legendary: [] };
@@ -457,7 +466,12 @@ function buildAssetSubset(playerCount) {
   bands.forEach((b, i) => {
     picked.push(...shuffle(byBand[b]).slice(0, counts[i]));
   });
-  return picked;
+
+  // Assign the distinct values 1..N in tier order (ties inside a tier broken
+  // randomly by the shuffle above), then hand back in tier order. The CALLER
+  // shuffles reveal order — values are known and countable, the sequence is not.
+  picked.sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier]);
+  return picked.map((a, i) => ({ ...a, value: i + 1 }));
 }
 
 // ---------- AI policy ----------
@@ -499,7 +513,10 @@ function aiDecide({
   netWorthLeader,
 }) {
   const p = AI_POLICIES[policyName] || AI_POLICIES.balanced;
-  const valueScore = asset.value / MAX_CARD_VALUE; // 0..1, 13 = ceiling (Great Sphinx tier)
+  // Normalise against the ASSET ceiling (16), not the card ceiling (13).
+  // Using MAX_CARD_VALUE here would push values 14-16 above 1.0 and make every
+  // bot bid on the top three assets unconditionally.
+  const valueScore = asset.value / MAX_ASSET_VALUE; // 0..1, 16 = ceiling
   const scarcityPressure = remainingCards <= 3 ? p.scarce3 : remainingCards <= 6 ? p.scarce6 : 0;
   const contestPressure = p.contest * opponentsWithCards;
   // Trailing bots loosen up; how much is the variable under test.
@@ -527,7 +544,7 @@ function aiDecide({
 
 // Legacy shim kept so nothing else in the file depends on the old signature.
 function aiShouldBid(asset, remainingCards) {
-  const valueScore = asset.value / MAX_CARD_VALUE;
+  const valueScore = asset.value / MAX_ASSET_VALUE;
   const scarcityPressure = remainingCards <= 3 ? 0.22 : remainingCards <= 6 ? 0.1 : 0;
   const noise = Math.random() * 0.24 - 0.12;
   const threshold = 0.42 + scarcityPressure + noise;
@@ -690,9 +707,10 @@ export default function App() {
   const [nameInput, setNameInput] = useState("");
   const [netWorth, setNetWorth] = useState({});
   const [assetDeck, setAssetDeck] = useState([]); // remaining assets in the shared pool, drawn one at a time
-  const [lowValuePool, setLowValuePool] = useState([]); // remaining value tokens for the "low" band (trinket+common)
-  const [midValuePool, setMidValuePool] = useState([]); // remaining value tokens for the "mid" band (mid+high)
-  const [legendaryValuePool, setLegendaryValuePool] = useState([]); // remaining value tokens for the "legendary" band
+  // Band counts are DERIVED from what's still in assetDeck (see bandCounts
+  // below) rather than tracked as separate token piles. With distinct values
+  // baked into each asset at deal time there is nothing left to keep in sync,
+  // and the old parallel piles were a standing source of drift.
   const [totalAssetsAtStart, setTotalAssetsAtStart] = useState(0);
   const [currentAsset, setCurrentAsset] = useState(null);
   const [assetsSeen, setAssetsSeen] = useState(0); // how many assets have been drawn so far this match (1-indexed order)
@@ -768,28 +786,15 @@ export default function App() {
     setHowToPlaySlide((i) => Math.max(i - 1, 0));
   }
 
-  // Draw the next single asset from the shared pool. Value is drawn from that
-  // asset's own tier band's dedicated token pool (see VALUE_BAND_FOR_TIER),
-  // so identity and value stay coupled at the band level while still varying
-  // within the band. No waves, no per-round batching — assets appear one at a
-  // time, in shuffled order, until the shared pool of 28 is exhausted.
-  function drawNextAsset(pile, low, mid, legendary) {
+  // Draw the next single asset from the shared pool. No waves, no per-round
+  // batching — assets appear one at a time, in shuffled order, until the
+  // match's 16-asset pool is exhausted or every hand is empty.
+  // Values are assigned once at match start (distinct 1..16) and travel with
+  // the asset, so drawing is just taking the next card off the shuffled pile.
+  // No separate value-token piles to keep in sync.
+  function drawNextAsset(pile) {
     if (!pile.length) return null;
-    const identity = pile[0];
-    const restPile = pile.slice(1);
-    const band = VALUE_BAND_FOR_TIER[identity.tier];
-    let value, restLow = low, restMid = mid, restLegendary = legendary;
-    if (band === "low") {
-      value = low[0];
-      restLow = low.slice(1);
-    } else if (band === "mid") {
-      value = mid[0];
-      restMid = mid.slice(1);
-    } else {
-      value = legendary[0];
-      restLegendary = legendary.slice(1);
-    }
-    return { asset: { ...identity, value }, restPile, restLow, restMid, restLegendary };
+    return { asset: pile[0], restPile: pile.slice(1) };
   }
 
   function startGame() {
@@ -879,17 +884,11 @@ export default function App() {
     });
 
     const pile = shuffle(assetSubset);
-    const low = shuffle(bandTokensFromPool(assetSubset, "low"));
-    const mid = shuffle(bandTokensFromPool(assetSubset, "mid"));
-    const legendary = shuffle(bandTokensFromPool(assetSubset, "legendary"));
     setTotalAssetsAtStart(pile.length);
 
-    const drawn = drawNextAsset(pile, low, mid, legendary);
+    const drawn = drawNextAsset(pile);
     setCurrentAsset(drawn.asset);
     setAssetDeck(drawn.restPile);
-    setLowValuePool(drawn.restLow);
-    setMidValuePool(drawn.restMid);
-    setLegendaryValuePool(drawn.restLegendary);
     setAssetsSeen(1);
 
     beginFirstAuction();
@@ -979,7 +978,7 @@ export default function App() {
             (o) => o !== name && (dealtHands.find((h) => h.name === o)?.cards.length ?? 0) > 0
           ).length,
           assetsRemaining: assetDeck.length,
-          legendaryRemaining: legendaryValuePool.length,
+          legendaryRemaining: bandCounts(assetDeck).legendary,
           netWorthSelf: netWorth[name] || 0,
           netWorthLeader: leaderWorth,
         });
@@ -1010,7 +1009,7 @@ export default function App() {
     });
     return () => timers.forEach((t) => t && clearTimeout(t));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, timerActive, currentAsset, biddingPool, players, aiPlayerNames, bidders, dealtHands, aiPolicies, netWorth, assetDeck, legendaryValuePool, assetsSeen]);
+  }, [screen, timerActive, currentAsset, biddingPool, players, aiPlayerNames, bidders, dealtHands, aiPolicies, netWorth, assetDeck, assetsSeen]);
 
   // end the bidding window early once every eligible player has placed a bid
   // (players who've already spent their whole hand can never bid, so they
@@ -1048,11 +1047,7 @@ export default function App() {
       cardsRemaining: Object.fromEntries(dealtHands.map((h) => [h.name, h.cards.length])),
       netWorthBefore: { ...netWorth },
       assetsRemaining: assetDeck.length,
-      bandsRemaining: {
-        low: lowValuePool.length,
-        mid: midValuePool.length,
-        legendary: legendaryValuePool.length,
-      },
+      bandsRemaining: bandCounts(assetDeck),
     };
   }
 
@@ -1187,7 +1182,12 @@ export default function App() {
 
   // Draw the next asset from the shared pool, or end the match if it's empty.
   function nextAsset() {
-    const drawn = drawNextAsset(assetDeck, lowValuePool, midValuePool, legendaryValuePool);
+    // End the match the moment nobody can bid any more, not just when the pile
+    // runs dry. Without this the app keeps presenting assets — full auction
+    // screen, full 10s timer — to a table holding zero cards, which is pure
+    // dead time with no possible player action.
+    const everyHandEmpty = dealtHands.length > 0 && dealtHands.every((h) => h.cards.length === 0);
+    const drawn = everyHandEmpty ? null : drawNextAsset(assetDeck);
     if (!drawn) {
       sfx.gameOver();
       setCelebrate({ legendary: true, id: Date.now() });
@@ -1197,9 +1197,6 @@ export default function App() {
     sfx.uiClick();
     setCurrentAsset(drawn.asset);
     setAssetDeck(drawn.restPile);
-    setLowValuePool(drawn.restLow);
-    setMidValuePool(drawn.restMid);
-    setLegendaryValuePool(drawn.restLegendary);
     setAssetsSeen((n) => n + 1);
     setBidders({});
     setAiPlayedCards({});
@@ -1214,9 +1211,6 @@ export default function App() {
     setPlayers([]);
     setNetWorth({});
     setAssetDeck([]);
-    setLowValuePool([]);
-    setMidValuePool([]);
-    setLegendaryValuePool([]);
     setTotalAssetsAtStart(0);
     setAssetsSeen(0);
     setCurrentAsset(null);
@@ -1276,11 +1270,7 @@ export default function App() {
   // Assets still waiting beyond the one currently on screen — this is what the
   // always-on pacing HUD reads from directly.
   const assetsRemainingAfterCurrent = assetDeck.length;
-  const bandsRemaining = {
-    low: lowValuePool.length,
-    mid: midValuePool.length,
-    legendary: legendaryValuePool.length,
-  };
+  const bandsRemaining = bandCounts(assetDeck);
 
   return (
     <div style={styles.appRoot}>
@@ -1528,7 +1518,7 @@ function PacingHUD({ lang, totalRemaining, bands, variant = "header" }) {
 
 function SetupScreen({ lang, players, aiPlayerNames, nameInput, setNameInput, addPlayer, addAIPlayer, removePlayer, startGame, onOpenHowToPlay }) {
   const L = STR[lang];
-  const scaledPool = Math.min(ASSET_POOL.length, ASSETS_PER_PLAYER * Math.max(players.length, 2));
+  const scaledPool = ASSETS_IN_MATCH;
   return (
     <div style={styles.panel}>
       <button style={styles.helpBtn} onClick={onOpenHowToPlay} aria-label={L.howToPlayTitle}>
