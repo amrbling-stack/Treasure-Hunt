@@ -187,7 +187,6 @@ const STR = {
     hudLowTier: "Low",
     hudMidTier: "Mid",
     hudLegendaryTier: "Legendary",
-    hudTotalLeft: "left",
 
     introTitle: "This Round's Treasures",
     introMemorizeUnit: "to memorize \u2014 bidding starts automatically",
@@ -286,7 +285,6 @@ const STR = {
     hudLowTier: "\u0645\u0646\u062e\u0641\u0636",
     hudMidTier: "\u0645\u062a\u0648\u0633\u0637",
     hudLegendaryTier: "\u0623\u0633\u0637\u0648\u0631\u064a",
-    hudTotalLeft: "\u0645\u062a\u0628\u0642\u064a",
 
     introTitle: "\u0643\u0646\u0648\u0632 \u0647\u0630\u0647 \u0627\u0644\u062c\u0648\u0644\u0629",
     introMemorizeUnit: "\u0644\u0644\u062d\u0641\u0638 \u2014 \u064a\u0628\u062f\u0623 \u0627\u0644\u0645\u0632\u0627\u062f \u062a\u0644\u0642\u0627\u0626\u064a\u0627\u064b",
@@ -1086,7 +1084,11 @@ export default function App() {
   }
 
   function declareWinner(name) {
-    const legendary = currentAsset.value >= 10;
+    // Tier, not a raw value cutoff. The old `value >= 10` test dated from the
+    // 1-13 value scale; under distinct 1-16 it fires on 7 of 16 assets — almost
+    // half the match — which drains the legendary moment of any meaning.
+    // Tier keeps it at the genuine top three (values 14-16).
+    const legendary = currentAsset.tier === "legendary";
     setNetWorth((nw) => ({ ...nw, [name]: (nw[name] || 0) + currentAsset.value }));
     setLastResult({ winner: name, asset: currentAsset, unclaimed: false });
     setHistory((h) => [...h, { asset: currentAsset, winner: name, value: currentAsset.value }]);
@@ -1269,8 +1271,6 @@ export default function App() {
 
   // Assets still waiting beyond the one currently on screen — this is what the
   // always-on pacing HUD reads from directly.
-  const assetsRemainingAfterCurrent = assetDeck.length;
-  const bandsRemaining = bandCounts(assetDeck);
 
   return (
     <div style={styles.appRoot}>
@@ -1296,7 +1296,7 @@ export default function App() {
 
       <div style={styles.stage}>
         {screen !== "setup" && screen !== "seat-arrange" && screen !== "auction" && (
-          <PacingHUD lang={lang} totalRemaining={assetsRemainingAfterCurrent} bands={bandsRemaining} />
+          <AppHeader />
         )}
 
         {celebrate && <Confetti key={celebrate.id} legendary={celebrate.legendary} />}
@@ -1356,8 +1356,6 @@ export default function App() {
             onTimeUp={stopTimerAndReveal}
             remainingCounts={Object.fromEntries(dealtHands.map((h) => [h.name, h.cards.length]))}
             aiPlayerNames={aiPlayerNames}
-            hudTotalRemaining={assetsRemainingAfterCurrent}
-            hudBands={bandsRemaining}
           />
         )}
 
@@ -1470,48 +1468,17 @@ function HowToPlayModal({ lang, slide, onNext, onBack, onClose }) {
 // of floating at the top of the screen — see AuctionScreen. This is what
 // keeps it clear of the top seat, which always sits at the screen's top
 // edge: the HUD simply isn't up there anymore, it's inside the card.
-function PacingHUD({ lang, totalRemaining, bands, variant = "header" }) {
-  const L = STR[lang];
-  const pillRow = (
-    <div style={variant === "panel" ? styles.pacingHudPanel : styles.pacingHud}>
-      {["legendary", "mid", "low"].map((band) => {
-        const meta = BAND_META[band];
-        const { Icon } = meta;
-        return (
-          <div
-            key={band}
-            aria-label={L[meta.labelKey]}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              background: meta.bg,
-              border: meta.border ? `1px solid ${meta.border}` : "none",
-              borderRadius: 999,
-              padding: "3px 9px",
-              boxShadow: meta.boxShadow || "none",
-            }}
-          >
-            <Icon size={meta.iconSize} color={meta.color} />
-            <span style={{ fontSize: 12, fontWeight: meta.fontWeight, color: meta.color }}>{bands[band]}</span>
-          </div>
-        );
-      })}
-      <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 2, paddingLeft: 10, borderLeft: "1px solid #2A3348" }}>
-        <span style={{ fontSize: 11, color: "#8A93A8" }}>{L.hudTotalLeft}</span>
-        <span style={{ fontSize: 14, fontWeight: 700, color: "#F2CB6B" }}>{totalRemaining}</span>
-      </div>
-    </div>
-  );
-
-  if (variant === "panel") return pillRow;
-
+// The pacing HUD is deliberately gone. Tracking which treasures have already
+// surfaced is a PLAYER skill in Kanz, not something the app does for them:
+// with distinct values 1-16 the information is perfectly knowable by anyone
+// paying attention, so displaying it would hand out for free the one thing
+// attentive play is supposed to earn.
+function AppHeader() {
   return (
     <div style={styles.header}>
       <div style={styles.headerTitle}>
         <span style={styles.headerTitleText}>KANZ</span>
       </div>
-      {pillRow}
     </div>
   );
 }
@@ -1649,7 +1616,7 @@ function SeatArrangeScreen({ lang, playerName, index, total, tempPick, taken, cl
   );
 }
 
-function AuctionScreen({ lang, asset, assetsSeen, totalAssets, players, seatPositions, tieRound, bidders, toggleBid, timeLeft, remainingCounts, aiPlayerNames = [], hudTotalRemaining, hudBands }) {
+function AuctionScreen({ lang, asset, assetsSeen, totalAssets, players, seatPositions, tieRound, bidders, toggleBid, timeLeft, remainingCounts, aiPlayerNames = [] }) {
   const L = STR[lang];
   const pct = timeLeft / AUCTION_TIMER_SECONDS;
   const urgent = timeLeft <= 3;
@@ -1676,10 +1643,6 @@ function AuctionScreen({ lang, asset, assetsSeen, totalAssets, players, seatPosi
             bid dock always sits at the screen's top edge, so moving the HUD
             down here is what actually clears that space, not just visually
             separating them. */}
-        {hudBands && (
-          <PacingHUD lang={lang} totalRemaining={hudTotalRemaining} bands={hudBands} variant="panel" />
-        )}
-
         <div style={{ ...styles.assetCard, boxShadow: "0 0 60px rgba(212,175,55,0.25)", borderColor: "#D4AF37" }}>
           <div style={styles.assetValueRow}>
             <span style={styles.assetValue}>{asset.value}</span>
@@ -2062,7 +2025,7 @@ const styles = {
   },
   // Same pill row as `pacingHud`, but sized/placed to sit inline inside the
   // auction panel (below the timer ring) instead of floating in the top
-  // header — see PacingHUD's variant="panel".
+  // header — the pacing HUD that used to sit here was removed by design.
   pacingHudPanel: {
     display: "flex",
     alignItems: "center",
