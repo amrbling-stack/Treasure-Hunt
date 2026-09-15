@@ -1,37 +1,48 @@
 -- ============================================================================
--- Kanz analytics schema — ALL FOUR TABLES
+-- Kanz analytics schema — ALL FOUR TABLES, matching PRODUCTION as of 2026-09-15
 -- ============================================================================
 -- Project: tghuwknvudejhreyfutf ("kanz")
 --
--- WHY THIS FILE EXISTS
--- The previous schema file created only ai_decisions and assumed the other
--- three tables already existed, because they had been typed by hand into the
--- Supabase SQL editor during one session. They did not survive. Every write
--- from the app was rejected for a month with no visible symptom, because
--- supabase-js resolves with an { error } object rather than throwing, and the
--- loggers never inspected it. Both halves are fixed: the loggers now report
--- rejections (see src/lib/supabase.js), and the full schema lives here in
--- version control instead of in someone's browser history.
+-- CORRECTION — read this first
+-- A previous version of this file (and the commit that introduced it) claimed
+-- game_sessions, hand_deals and asset_events did not exist and had lost all
+-- data. That was wrong. Those three tables were live the whole time, with six
+-- completed matches (16-29 Aug) and 158 asset-event rows intact. The false
+-- conclusion came from querying this project while a restore-from-pause was
+-- still in progress (status COMING_UP), which briefly showed an empty public
+-- schema.
 --
--- Every column below is derived from what src/lib/supabase.js actually writes.
+-- What WAS genuinely broken: ai_decisions had never been created (0 rows,
+-- table absent), and none of the four loggers checked the error object
+-- supabase-js returns on a rejected insert (see src/lib/supabase.js) - so a
+-- failure there would have been silent too. Both are still fixed.
+--
+-- This version's column types, nullability and defaults are transcribed
+-- directly from information_schema.columns against the live database, not
+-- inferred from the insert payloads. Where production uses gen_random_uuid()
+-- primary keys and NOT NULL columns the original ad-hoc setup added, this
+-- file preserves them, so running it against a fresh project reproduces what
+-- is actually running today.
+--
 -- Safe to re-run: every statement is IF NOT EXISTS.
 -- ============================================================================
 
 -- ---------------------------------------------------------------
--- 1. game_sessions — one row per completed match
+-- 1. game_sessions - one row per completed match
 -- ---------------------------------------------------------------
 create table if not exists game_sessions (
-  id                  bigserial primary key,
-  created_at          timestamptz not null default now(),
+  id                  uuid        primary key default gen_random_uuid(),
   match_id            uuid        not null,
+  created_at          timestamptz not null default now(),
 
-  player_count        int,
-  players             jsonb,        -- [{ name, score, is_ai }]
+  player_count        int         not null,
+  players             jsonb       not null,   -- [{ name, score, is_ai }]
   winner_name         text,
-  wave_count          int,          -- legacy field: always 1 since waves were removed
+  wave_count          int,                    -- legacy: always 1 since waves were removed
   language            text,
-  memory_challenge    boolean,
+  memory_challenge    boolean     default false,
   duration_seconds    int,
+  raw_meta            jsonb,                  -- free-form extra fields from early builds
 
   -- AI context: bot-containing matches must be separable from all-human ones,
   -- or bot behaviour silently contaminates human balance statistics.
@@ -44,7 +55,7 @@ create table if not exists game_sessions (
 
   -- balance metrics
   win_margin          int,
-  cards_unspent       int,
+  cards_unspent       jsonb,        -- { playerName: cardsLeft } as actually stored, not a single int
   assets_unclaimed    int,
   total_assets        int
 );
@@ -54,25 +65,25 @@ create index if not exists game_sessions_created_idx on game_sessions (created_a
 create index if not exists game_sessions_players_idx on game_sessions (player_count);
 
 -- ---------------------------------------------------------------
--- 2. hand_deals — one row per player per deal
+-- 2. hand_deals - one row per player per deal
 -- ---------------------------------------------------------------
 create table if not exists hand_deals (
-  id                    bigserial primary key,
-  created_at            timestamptz not null default now(),
+  id                    uuid        primary key default gen_random_uuid(),
   match_id              uuid        not null,
-  wave                  int,
+  created_at            timestamptz not null default now(),
+  wave                  int         not null,
 
-  player_count          int,
-  seat_index            int,
-  player_name           text,
-  hand_size             int,
-  cards                 jsonb,      -- the dealt card values
-  hand_total            int,
-  max_card              int,
+  player_count          int         not null,
+  seat_index            int         not null,
+  player_name           text        not null,
+  hand_size             int         not null,
+  cards                 jsonb       not null,   -- the dealt card values
+  hand_total            int         not null,
+  max_card              int         not null,
 
-  forced_clash_wave     boolean,
-  overlap_score         numeric,
-  fallback_used         boolean,
+  forced_clash_wave     boolean     not null default false,
+  overlap_score         int,
+  fallback_used         boolean     not null default false,
 
   -- Per-seat AI tagging: lets seat-fairness queries exclude bot seats, and
   -- lets policy performance be traced back to a specific seat.
@@ -89,33 +100,33 @@ create index if not exists hand_deals_match_idx  on hand_deals (match_id);
 create index if not exists hand_deals_player_idx on hand_deals (player_name);
 
 -- ---------------------------------------------------------------
--- 3. asset_events — one row per asset resolution
+-- 3. asset_events - one row per asset resolution
 -- ---------------------------------------------------------------
 create table if not exists asset_events (
-  id                    bigserial primary key,
-  created_at            timestamptz not null default now(),
+  id                    uuid        primary key default gen_random_uuid(),
   match_id              uuid        not null,
-  wave                  int,        -- repurposed: sequence position in the match
-  asset_index_in_wave   int,
+  created_at            timestamptz not null default now(),
+  wave                  int         not null,   -- repurposed: sequence position in the match
+  asset_index_in_wave   int         not null,
 
-  asset_key             text,
-  asset_name            text,
-  asset_value           int,
-  asset_tier            text,
-  legendary             boolean,
+  asset_key             text        not null,
+  asset_name            text        not null,
+  asset_value           int         not null,
+  asset_tier            text        not null,
+  legendary             boolean     not null default false,
 
-  forced_clash_wave     boolean,
-  tie_break_round       boolean,
+  forced_clash_wave     boolean     not null default false,
+  tie_break_round       boolean     not null default false,
 
-  participants          jsonb,
-  participant_count     int,
+  participant_count     int         not null,
+  participants          jsonb       not null,
   winner_name           text,
   winning_card_value    int,
-  unclaimed             boolean,
-  decided_early         boolean,
-  seconds_left_at_close numeric,
+  unclaimed             boolean     not null default false,
+  decided_early         boolean     not null default false,
+  seconds_left_at_close int,
 
-  -- AI context: aiPlayedCards is the only record of what a bot actually bid;
+  -- AI context: ai_played_cards is the only record of what a bot actually bid;
   -- humans hold physical cards the app never sees.
   ai_participants       jsonb,
   ai_played_cards       jsonb,
@@ -141,15 +152,14 @@ create index if not exists asset_events_tier_idx  on asset_events (asset_tier);
 create index if not exists asset_events_value_idx on asset_events (asset_value);
 
 -- ---------------------------------------------------------------
--- 4. ai_decisions — one row per AI decision point (bids AND passes)
+-- 4. ai_decisions - one row per AI decision point (bids AND passes)
 -- ---------------------------------------------------------------
--- This is the table that makes AI improvement possible. It records the
--- features the bot saw, the policy variant it was running, the threshold that
--- produced the choice, and what that choice actually earned. A pass is as
--- informative as a bid for learning a policy, and passes are otherwise
--- invisible in the data.
+-- This table genuinely did not exist before this migration (0 rows, confirmed
+-- absent). It records the features the bot saw, the policy variant it was
+-- running, the threshold that produced the choice, and what that choice
+-- actually earned. A pass is as informative as a bid for learning a policy.
 create table if not exists ai_decisions (
-  id                bigserial primary key,
+  id                bigserial   primary key,
   created_at        timestamptz not null default now(),
   match_id          uuid        not null,
 
@@ -196,11 +206,9 @@ create index if not exists ai_decisions_policy_idx on ai_decisions (policy_name,
 create index if not exists ai_decisions_tier_idx   on ai_decisions (asset_tier);
 
 -- ---------------------------------------------------------------
--- 5. Row Level Security — anon may INSERT only
+-- 5. Row Level Security - anon may INSERT (and, as already configured in
+--    production, SELECT) - never UPDATE or DELETE.
 -- ---------------------------------------------------------------
--- The app ships an anon key client-side by design. RLS is what actually
--- protects the data: anonymous clients can append gameplay rows but cannot
--- read, update or delete anything.
 alter table game_sessions enable row level security;
 alter table hand_deals    enable row level security;
 alter table asset_events  enable row level security;
